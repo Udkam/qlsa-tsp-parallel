@@ -1,0 +1,299 @@
+并行算法
+期末大作业要求及选题参考
+陶钧
+taoj23@mail.sysu.edu.cn
+
+中山大学 计算机学院
+国家超级计算广州中心
+
+大作业要求
+评分标准
+– 完成情况 （50%）+技术难度加分（30%）
+• 算法难度、实现难度、工程量等，包括但不限于
+• 课程中并行算法结合实际应用，或复现近期论文中的并行算法
+– 与近期论文对比并取得优于论文中性能的项目，在这两项上可获满分
+
+• 工程难度：使用较为复杂的编程架构
+– 多 GPU 编程、MPI+CUDA、针对大规模数据的out-of-core计算等
+
+– 报告（20%）
+• 选题报告：说明团队成员、大作业的选题、预期完成的目标
+• 小组报告：在预期完成的目标的基础上，说明实际完成的内容，实施的
+具体方案，在实施过程中解决的问题，并行算法的性能（如并行效率、
+加速比）等任何能说明完成质量的内容
+• 成员报告：小组中每个成员应提交一份个人报告，说明个人在小组中发
+2
+挥的作用，及完成的工作；个人报告以附录形式，附在小组报告后
+
+大作业要求
+关键时间节点
+– 提交时间均为当日晚23：59分前
+– 5月31日：选题报告
+• 小组成员名单（每组不多于3人，如选题工作量过大需要3人以上组队，
+请提前与我或TA沟通）
+• 选题内容（例如，预期实现算法）
+
+– 学期结束前：小组及个人报告
+
+3
+
+大作业选题参考
+利用并行算法完成一个应用
+– 使用多个并行算法构建应用
+• 可以是课本上的算法，也可以是论文中的算法
+• 避免简单的并行化实现
+
+参考选题
+– 最近邻搜索
+– 并行模拟退火
+– 神经网络
+– 并行求解器
+
+4
+
+最近邻搜索（NNS）
+目标：在尺度空间中给定一个点集S和一个目标点p，在S
+中找出距离p最近的点
+– 模式识别，计算机视觉，碰撞检测，光线追踪，几何体的距离度
+量（MCP距离、Hausdorff距离等），N-body模拟等
+– k-NN（k-nearest neighbors）：在S中找出离p最近的k个点
+
+直接思路
+– 线性查找：计算p与S中每一个点的距离，并找出距离最小的（一
+个或k个）点
+• 并行计算距离，并行归约
+
+5
+
+最近邻搜索（NNS）
+通过树结构进行查找
+– 常见数据结构
+• bounding volume hierarchy (BVH)-tree，octree，kd-tree等
+
+– 举例：BVH-tree
+• 使用包围盒（bounding volume）将物体分配到树的节点中
+• 在查找最近邻时，先判断与包围盒的距离
+
+图片来自 https://devblogs.nvidia.com/thinking-parallel-part-ii-tree-traversal-gpu/
+
+6
+
+最近邻搜索（NNS）
+通过树结构进行查找
+– 常见数据结构
+• bounding volume hierarchy (BVH)-tree，octree，kd-tree等
+
+– 举例：kd-tree
+• Octree（八叉树）的高维扩展
+• 每次通过高维平面将空间一分为二
+
+图片来自 https://www.cs.utexas.edu/~ckm/teaching/cs354_f11/lectures/Lecture21.pdf
+
+7
+
+最近邻居
+参考资料
+– Brown and Snoeyink, GPU Nearest Neighbor Searches Using a
+Minimal kd-Tree
+• http://on-demand.gputechconf.com/gtc/2010/presentations/S12140Superfast-Nearest-Neighbor-Searches-Using-Minimal-kd-Tree.pdf
+
+– Karras, Maximizing Parallelism in the Construction of BVHs,
+Octrees, and k-d Trees
+• https://research.nvidia.com/sites/default/files/publications/karras2012hp
+g_paper.pdf
+
+– Lauterbach et al., Fast BVH Construction on GPUs
+• http://graphics.snu.ac.kr/class/graphics2011/references/2007_lauterbac
+h.pdf
+8
+
+模拟退火算法
+目标：寻找目标函数的全局最优解（对应搜索算法）
+– 采取随机行动
+• 随机行动范围随着算法运行逐渐减小（退火）
+• 可能使用较差的解代替当前解
+Let s = s0
+For k = 0 through kmax (exclusive):
+T ← temperature(k ∕ kmax)
+Pick a random neighbour, snew ← neighbour(s)
+If P(E(s), E(snew), T) ≥ random(0, 1):
+s ← snew
+Output: the final state s
+
+9
+
+模拟退火算法
+应用：
+– 旅行推销员问题（travelling salesman problem）
+• 给定一组点及每两个点之间的距离，求访问每个点一次并回到起始点的
+最短回路
+• NP问题
+• 使用模拟退火随机改变路径
+图片来自 https://en.wikipedia.org/wiki/Simulated_annealing
+
+10
+
+模拟退火算法
+应用：
+– 破译经典加密算法
+• Caesar cipher, Vigenère cipher, Playfair cipher
+• Caesar cipher: 每个字母移动固定步数
+– 不改变单个字母分布pattern（只是平移）
+– 不需要模拟退火，但可并行
+– 使用𝜒 2 距离计算两个分布间的距离
+
+图片来自 https://en.wikipedia.org/wiki/Caesar_cipher
+图片来自 https://pages.mtu.edu/~shene/NSF-4/Tutorial/VIG/Vig-Frequency-Analysis.html 11
+
+模拟退火算法
+应用：
+– 破译经典加密算法
+• Vigenère cipher : 每个字母移动由秘钥指定的固定步数
+– 例子：使用秘钥LEMON
+– 改变单个字母总体分布pattern，但不改变隔步长（秘钥长度）的分布
+– 先确定秘钥长度，再确定每一位上的字母
+
+图片来自 https://en.wikipedia.org/wiki/Vigen%C3%A8re_cipher
+12
+
+模拟退火算法
+应用：
+– 破译经典加密算法
+• Playfair cipher基于一个5x5的字母矩阵将原文中的一对字母加密为密文
+中的一对字母
+– 打破单个字母的分布pattern
+– 但字母对的出现频率将提示解密是否正确
+» 使用距离计算解密得到的字母对概率分布与标准英文的字母对分布之间的差异
+» 随机修改矩阵不断降低差异
+
+图片来自 https://en.wikipedia.org/wiki/Playfair_cipher
+
+13
+
+模拟退火算法
+参考资料
+– Wikipedia，Simulated Annealing
+• https://en.wikipedia.org/wiki/Simulated_annealing
+
+– Simulated Annealing, The Travelling Salesman Problem
+• https://www.fourmilab.ch/documents/travelling/anneal/
+
+– Wikipedia, Playfair Cipher
+• https://en.wikipedia.org/wiki/Playfair_cipher
+
+– Cowan, Breaking Short Playfair Cipher with the Simulated Annealing
+Algorithm
+• https://pdfs.semanticscholar.org/1b7d/937237bd17e49301045df20d7f31a818698f.pdf
+
+– Shene, Cryptography Visualization Tools: A Tutorial
+– https://pages.mtu.edu/~shene/NSF-4/Tutorial/index.html
+
+14
+
+神经网络
+目标：将输入数据映射到输出（对应矩阵算法）
+– 每层可视为ℎ𝑖+1 = 𝑓 𝑊 𝑖 ⋅ 𝑥 𝑖 ，即矩阵乘向量
+
+– 训练神经网络需要计算梯度
+
+15
+
+图布局算法
+目标：将数据点
+根据一定规则（
+例如，距离）放
+置在二维平面上
+，使数据点在平
+面上的位置关系
+能反映其在原始
+空间中的关系
+– 右图：唐朝诗人
+关系网
+图片来自https://www.guokr.com/article/442052/
+16
+
+图布局算法
+常见算法
+– 力导向布局(force-directed graph layout)
+• FR-layout, KW-layout, stress majorization
+• 最小化能量方程
+
+17
+
+图布局算法
+常见算法
+– 力导向布局(force-directed graph layout)
+• FR-layout, KW-layout, stress majorization
+• 使用弹簧系统模拟图布局
+– 当两点在平面上距离小于目标距离时产生排斥力
+– 当两点在平面上距离大于目标距离时产生牵引力
+
+– 降维算法（Dimension reduction）：MDS、LLE、t-SNE等
+
+Kobourov, Spring Embedders and Force Directed Graph Drawing Algorithms, ArXiv, 2012
+
+18
+
+图布局算法
+参考资料
+– Force-Directed Drawing Algorithms
+• http://cs.brown.edu/people/rtamassi/gdhandbook/chapters/forcedirected.pdf
+
+– Gibson et al., A Survey of Two-Dimensional Graph Layout
+Techniques for Infomration Visualization
+• http://www.leonidzhukov.net/hse/2015/sna/papers/gibson2013
+
+– Cui, A Survey of Graph Visualization
+• https://pdfs.semanticscholar.org/2a52/cd195942cd901d73c118d6a66c9
+7934df3fb.pdf
+
+19
+
+图采样算法
+目标：对大规模图中的节点及边进行采样，使采样得到的
+图尽可能反映原图的结构或特征（对应图算法）
+
+Nguyen et al., Proxy Graph: Visual Quality Metrics of Big Graph Sampling 20
+
+图采样算法
+常见方法
+– 随机点采样、随机边采样
+– 基于图遍历的算法
+• Random walk，metropolis-hasting random walk，snow-ball sampling，
+forest fire sampling
+
+原图
+
+随机点采样
+
+随机点采样
+
+Random walk
+21
+
+图采样算法
+参考资料
+– A Survey and Taxonomy of Graph Sampling
+• 主要参考第四节（Traversal Based Sampling）
+• https://arxiv.org/pdf/1308.5865.pdf
+
+– 上海交通大学复杂网络与控制实验室，相关采样算法
+• http://cnc.sjtu.edu.cn/sampling/method.html
+
+22
+
+其他选题
+拓宽选题思路
+– 课本相关章节
+• 数值模拟（如并行求解器）
+• 并行模型的模拟及验证
+
+– 选取感兴趣的论文，并将其内容并行化
+
+23
+
+Questions?
+
+24
+
+

@@ -1,0 +1,11 @@
+NAME: square4
+TYPE: TSP
+COMMENT: Four-city square fixture for SA and QLSA tests
+DIMENSION: 4
+EDGE_WEIGHT_TYPE: EUC_2D
+NODE_COORD_SECTION
+1 0 0
+2 10 0
+3 10 10
+4 0 10
+EOF

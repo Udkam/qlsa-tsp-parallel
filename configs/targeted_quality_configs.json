@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "description": "Step 6C targeted high-budget quality experiments. Each config expands over iterations and chains.",
+  "configs": [
+    {
+      "name": "eil101-sa-tuned-high-budget",
+      "instance": "eil101",
+      "family": "sa",
+      "variant": "tuned-high-budget",
+      "parameters": {
+        "iterations": [1000000, 2000000],
+        "chains": [64, 128],
+        "threads": 8,
+        "parallel": "omp",
+        "t0": 100,
+        "tf": 0.001,
+        "init": "nn"
+      }
+    },
+    {
+      "name": "eil101-qlsa-tuned-high-budget",
+      "instance": "eil101",
+      "family": "qlsa",
+      "variant": "tuned-high-budget",
+      "parameters": {
+        "iterations": [1000000, 2000000],
+        "chains": [64, 128],
+        "threads": 8,
+        "parallel": "omp",
+        "t0": 1000,
+        "tf": 0.001,
+        "alpha": 0.1,
+        "gamma": 0.8,
+        "epsilon": 0.05,
+        "policy": "epsilon-greedy",
+        "init": "nn"
+      }
+    },
+    {
+      "name": "rat99-qlsa-quality-first-high-budget",
+      "instance": "rat99",
+      "family": "qlsa",
+      "variant": "quality-first-high-budget",
+      "parameters": {
+        "iterations": [2000000, 3000000],
+        "chains": [64, 128],
+        "threads": 8,
+        "parallel": "omp",
+        "t0": 1000,
+        "tf": 0.001,
+        "alpha": 0.2,
+        "gamma": 0.95,
+        "epsilon": 0.2,
+        "policy": "epsilon-greedy",
+        "init": "nn"
+      }
+    },
+    {
+      "name": "rat99-sa-tuned-high-budget",
+      "instance": "rat99",
+      "family": "sa",
+      "variant": "tuned-high-budget",
+      "parameters": {
+        "iterations": [1000000, 2000000],
+        "chains": [64, 128],
+        "threads": 8,
+        "parallel": "omp",
+        "t0": 3000,
+        "tf": 0.001,
+        "init": "nn"
+      }
+    }
+  ]
+}

@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "description": "Step 6B tuned SA/QLSA parameter configurations selected from Step 6A search for independent validation.",
+  "configs": [
+    {
+      "name": "eil76-sa-tuned",
+      "instance": "eil76",
+      "family": "sa",
+      "variant": "tuned",
+      "parameters": {
+        "iterations": 1000000,
+        "t0": 300,
+        "tf": 0.001,
+        "init": "nn",
+        "chains": 32,
+        "threads": 8,
+        "parallel": "omp"
+      }
+    },
+    {
+      "name": "eil76-qlsa-tuned",
+      "instance": "eil76",
+      "family": "qlsa",
+      "variant": "tuned",
+      "parameters": {
+        "iterations": 1000000,
+        "t0": 1000,
+        "tf": 0.001,
+        "alpha": 0.05,
+        "gamma": 0.8,
+        "epsilon": 0.2,
+        "policy": "epsilon-greedy",
+        "init": "nn",
+        "chains": 32,
+        "threads": 8,
+        "parallel": "omp"
+      }
+    },
+    {
+      "name": "rat99-sa-tuned",
+      "instance": "rat99",
+      "family": "sa",
+      "variant": "tuned",
+      "parameters": {
+        "iterations": 1000000,
+        "t0": 3000,
+        "tf": 0.001,
+        "init": "nn",
+        "chains": 32,
+        "threads": 8,
+        "parallel": "omp"
+      }
+    },
+    {
+      "name": "rat99-qlsa-quality-first",
+      "instance": "rat99",
+      "family": "qlsa",
+      "variant": "quality-first",
+      "parameters": {
+        "iterations": 2000000,
+        "t0": 1000,
+        "tf": 0.001,
+        "alpha": 0.2,
+        "gamma": 0.95,
+        "epsilon": 0.2,
+        "policy": "epsilon-greedy",
+        "init": "nn",
+        "chains": 32,
+        "threads": 8,
+        "parallel": "omp"
+      }
+    },
+    {
+      "name": "rat99-qlsa-tradeoff",
+      "instance": "rat99",
+      "family": "qlsa",
+      "variant": "tradeoff",
+      "parameters": {
+        "iterations": 1000000,
+        "t0": 1000,
+        "tf": 0.0001,
+        "alpha": 0.05,
+        "gamma": 0.95,
+        "epsilon": 0.2,
+        "policy": "epsilon-greedy",
+        "init": "nn",
+        "chains": 32,
+        "threads": 8,
+        "parallel": "omp"
+      }
+    },
+    {
+      "name": "eil101-sa-tuned",
+      "instance": "eil101",
+      "family": "sa",
+      "variant": "tuned",
+      "parameters": {
+        "iterations": 1000000,
+        "t0": 100,
+        "tf": 0.001,
+        "init": "nn",
+        "chains": 32,
+        "threads": 8,
+        "parallel": "omp"
+      }
+    },
+    {
+      "name": "eil101-qlsa-tuned",
+      "instance": "eil101",
+      "family": "qlsa",
+      "variant": "tuned",
+      "parameters": {
+        "iterations": 1000000,
+        "t0": 1000,
+        "tf": 0.001,
+        "alpha": 0.1,
+        "gamma": 0.8,
+        "epsilon": 0.05,
+        "policy": "epsilon-greedy",
+        "init": "nn",
+        "chains": 32,
+        "threads": 8,
+        "parallel": "omp"
+      }
+    }
+  ]
+}

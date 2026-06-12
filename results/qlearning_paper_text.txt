@@ -1,0 +1,3516 @@
+STATISTICS, OPTIMIZATION AND INFORMATION COMPUTING
+Stat., Optim. Inf. Comput., Vol. 15, May 2026, pp 3706–3730.
+Published online in International Academic Press (www.IAPress.org)
+
+Q-Learning-Assisted Simulated Annealing for Traveling Salesman Problem
+Optimization
+Nouhaila ADIL 1, * , Fakhita EDDAOUDI 1 , Halima LAKHBAB 1 , Mohamed NAIMI 2
+1
+
+Hassan II University of Casablanca, Mathematical Analysis, Algebra and Applications Laboratory,
+Faculty of Sciences Aı̈n Chock, Morocco
+2
+Hassan First University, LAMSAD Laboratory, National School of Applied Sciences, Berrechid, Morocco
+
+Abstract Simulated Annealing (SA) is a well-established metaheuristic for tackling combinatorial optimization problems.
+It draws inspiration from the physical process of annealing in metallurgy. In the optimization context, SA iteratively explores
+the solution space by accepting not only improving solutions but also, with a temperature-dependent probability, nonimproving ones. This mechanism enables the algorithm to escape local optima, thereby enhancing its ability to approach the
+global minimum of an objective function. Nevertheless, its overall performance is susceptible to the choice of the cooling
+schedule and the use of fixed neighborhood structures. In this work, we include Q-learning into the SA framework to improve
+its flexibility. Q-learning is a model-free, value-based method that enables an agent to learn optimal action-selection policies
+by iteratively updating Q-values using rewards obtained through exploration of the environment. The suggested approach
+directs the search toward more promising areas by dynamically choosing a leader solution from a predefined set of potential
+solutions that are updated during iterations, using a learned Q-policy. The Q-values are updated according to the relative
+improvement each leader provides over time, allowing adaptive exploitation of successful guides. Experimental results on
+popular benchmark instances of the Travelling Salesman Problem (TSP) from TSPLIB95 demonstrate that the Q-learningguided SA achieves better solution quality compared to classical SA in most of the tested instances. These results demonstrate
+how experience-driven decision-making in reinforcement learning can enhance metaheuristic performance.
+Keywords Combinatorial Optimization, Simulated Annealing, Traveling Salesman Problem, Q-Learning
+
+AMS 2010 subject classifications 90C27, 90B06, 90C59, 90-08, 90C90, 68T05, 68T20
+DOI: 10.19139/soic-2310-5070-3028
+
+1. Introduction
+Combinatorial optimization problems, such as the Traveling Salesman Problem (TSP), vehicle routing, and
+scheduling, are notoriously challenging due to their vast solution spaces and the frequent presence of numerous
+local optima. To address these issues, metaheuristic algorithms have gained widespread use. These methods provide
+reliable, near-optimal solutions without requiring strong problem-specific assumptions [3, 4]. Among them, SA has
+retained enduring popularity thanks to its conceptual simplicity, ability to probabilistically escape local minima,
+and solid theoretical grounding under suitable cooling schedules [5, 7].
+Despite these advantages, classical SA has well-known limitations. In complex or high-dimensional search
+spaces, its reliance on exploring the neighborhood of a single solution at a time can result in insufficient exploration
+and slow convergence. To overcome these limitations, researchers have increasingly explored hybridization over
+the past decade to improve SA’s performance with adaptive mechanisms that more effectively balance exploration
+and exploitation, especially in routing contexts [9]. One particularly promising direction is the integration of
+∗
+
+Correspondence to: Nouhaila Adil (Email: adil.nouhaila@gmail.com). Department of Mathematics and Computer Sciences, Hassan II
+University.
+
+ISSN 2310-5070 (online) ISSN 2311-004X (print)
+Copyright © 2026 International Academic Press
+
+N. ADIL, F. EDDAOUDI, H. LAKHBAB AND M. NAIMI
+
+3707
+
+Reinforcement Learning (RL) techniques, which allow algorithms to dynamically adjust their behavior based
+on accumulated search experience [23, 6, 10]. By leveraging feedback from past decisions, RL-enhanced
+metaheuristics can guide the search toward more promising regions of the solution space and have demonstrated
+competitive performance in routing and scheduling problems.
+In this work, we propose Q-learning-Assisted Simulated Annealing (QLSA), a hybrid algorithm that integrates
+a stateless Q-learning mechanism into the SA framework. Unlike conventional SA, which always applies the
+neighborhood operator to the current solution, QLSA maintains a set of candidate solutions and employs Qlearning to adaptively select which candidate should lead the search. This design allows the algorithm to incorporate
+historical feedback into the exploration process, thereby improving its ability to escape poor-quality regions and
+discover better solutions.
+Our choice of Q-learning as the reinforcement learning mechanism is motivated by its simplicity, model-free
+nature, and proven effectiveness in metaheuristic contexts. Q-learning is well-suited for black-box optimization
+problems where state transitions are not explicitly defined, as it does not require environment modeling or gradient
+computation, unlike policy-gradient or actor-critic approaches. Furthermore, Q-learning’s off-policy nature allows
+it to learn an action-value function independently of the exploration policy, providing faster convergence and greater
+stability in static optimization landscapes [8], in contrast to on-policy methods such as SARSA. These properties
+make Q-learning particularly attractive for integration with SA, where decisions rely on accumulated experience
+across diverse candidate solutions rather than explicit state modeling.
+The contributions of this paper are twofold:
+• We propose QLSA, a novel hybrid algorithm that combines Q-learning with SA to enable adaptive candidate
+selection during the search.
+• We evaluate two classical exploration policies; ε-Greedy and Softmax; within QLSA, providing insights into
+their impact on search performance.
+The remainder of this paper is organized as follows. Section 2 reviews related work on hybrid metaheuristics
+and reinforcement learning-assisted optimization. Sections 3 and 4 define the TSP and detail the proposed QLSA
+algorithm, respectively. Section 5 presents the experimental setup and results. Finally, Section 6 summarizes our
+contributions and discusses future research directions.
+
+2. Related work
+The Traveling Salesman Problem (TSP) has long been regarded as a cornerstone of operations research and
+combinatorial optimization. First introduced by Dantzig in 1959 [25], it has continued to draw great interest
+thanks to its challenging nature and real-world relevance. Renowned for its computational complexity and practical
+relevance, the TSP is extensively used as a benchmark for evaluating the performance of discrete optimization
+methods and advancing the limits of existing approaches.
+Methods for solving the TSP generally fall into two categories: exact and approximate. Exact approaches
+guarantee the optimal solution but typically require considerable computational resources and time, making them
+impractical for large instances. In contrast, approximate methods aim for near-optimal solutions within a reasonable
+computational effort, often in polynomial time.
+Among these approximate approaches, metaheuristics play a particularly prominent role. These high-level
+strategies are designed to guide the search process through complex solution spaces, often inspired by natural
+processes or adaptive behaviors. One of their key advantages is their problem-independent nature, allowing them
+to be applied across a wide range of optimization contexts.
+Metaheuristics can be categorized into single-solution and population-based methods. Single solution
+approaches iteratively refine a single candidate solution, as seen in algorithms like Tabu Search (TS) [26] and
+Simulated Annealing (SA) [2]. Population-based approaches, on the other hand, explore multiple candidate
+solutions simultaneously, leveraging collective behaviors for improved search performance. Particle Swarm
+Optimization (PSO) [27] is a well-known example of this category.
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3708
+
+Q-LEARNING-ASSISTED SIMULATED ANNEALING FOR TSP
+
+SA represents a popular choice among single-based methods, due to its simplicity, robustness, and its distinctive
+ability to escape local optima. Over the years, researchers have enhanced SA and hybridized it with other algorithms
+to boost its efficiency and adaptability. For instance, Zhong et al. [11] incorporated the Metropolis acceptance
+criterion into a discrete Pigeon-Inspired Optimization algorithm, enabling the pigeons to enhance the algorithm’s
+ability to escape from premature convergence, resulting in strong performance on large-scale TSP instances.
+Similarly, Ezugwu et al. [12] hybridized SA with Symbiotic Organisms Search, and Zhou et al. [13] used SA
+to diversify the population of a Gene Expression Programming approach, both studies demonstrating how SA
+can significantly improve the search dynamics of other metaheuristics. Wu et al. [16] embedded Ant Colony
+Optimization (ACO) as a search strategy into SA, aiming to solve its problem of slow convergence speed and
+easily getting stuck in local optimal solutions, achieving faster convergence and superior performance compared
+with the original ACO and SA algorithms.
+Complementing these hybridizations, Zhan et al. [14] introduced a List-Based SA (LBSA) with an adaptive
+cooling schedule, simplifying parameter tuning and proving highly competitive across standard TSP benchmarks.
+This ability of being insensitive to the parameter values made the introduced mechanism very attractive and was
+used in other works. Another interesting work, by Adil and Lakhbab [15], explored the advantage of populationbased methods of sharing information of the search space among a population of swarm agents, and proposed a New
+Improved SA (NISA), which integrates a population-based improvement phase after the Metropolis acceptance
+step, leveraging social behaviors among candidate solutions to accelerate convergence and improve tour quality.
+Parallel to SA-focused enhancements, researchers have explored other advanced metaheuristic frameworks.
+Recent interesting works include Su et al. [17], where they proposed IDINFO, a discrete variant of the INFO
+metaheuristic integrated with multi-strategy search and threshold-based 2-opt/3-opt refinements, outperforming
+GWO, PSO, and AGA on TSPLIB and real-world routing tasks. Another work by Tian et al. [18] introduced a
+bioinspired two-stage surrogate-assisted algorithm combining clustering and Pigeon-Inspired Optimization that
+offers effective solutions for high-dimensional TSP instances.
+In recent years, Reinforcement Learning (RL) has emerged as a promising paradigm for improving
+metaheuristics by incorporating adaptive decision-making based on accumulated search experience. Sutton and
+Barto [23] laid the foundation for Q-learning and other value-based RL methods, which have since been applied
+to metaheuristic operator selection and parameter tuning. RL-based operator selection enables metaheuristics to
+learn which neighborhood moves or search strategies are most effective in different phases of the search [24].
+Some notable advances include attention-based learning integrated with 2-opt local search [19], learning-guided
+local search for asymmetric TSP [20]. Reinforcement learning has also been increasingly incorporated into
+metaheuristics, such as in Q-learning-guided search hybrids [21] and dynamic Q-learning approaches for adaptive
+annealing [22], enhancing decision-making in complex search spaces.
+Collectively, these works illustrate a clear trend: state-of-the-art TSP solvers are increasingly hybrid, adaptive,
+and learning-guided; an evolution that forms the foundation for our proposed Q-learning-assisted SA.
+
+3. Traveling salesman problem
+The Traveling Salesman Problem (TSP) is one of the most prominent and widely studied problems in combinatorial
+optimization. First formalized by Dantzig and colleagues in 1959 [25], it has attracted significant attention over the
+years and remains a challenging and highly relevant topic in operations research and computer science. Classified
+as NP-complete [28], the problem seeks the shortest possible route that visits each of N cities exactly once and
+returns to the starting point (Hamiltonian cycle). Formally, let G = (V, E) represent a complete graph, where V is
+the set of cities and E = {(ci , cj ) | ci , cj ∈ V, i ̸= j} denotes the set of edges connecting them. Each edge (i, j)
+has an associated travel cost dij .
+An illustrative example of the Traveling Salesman Problem is provided in Figure 1. The left panel shows a
+Hamiltonian cycle over six cities c1 , c2 , . . . , c6 , where each city is visited exactly once before returning to the
+starting point.
+The right panel represents the same instance as a complete weighted graph, with edge labels indicating the travel
+costs dij , the selected tour highlighted in solid black, and non-selected edges shown as dashed lines. The tour
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3709
+
+N. ADIL, F. EDDAOUDI, H. LAKHBAB AND M. NAIMI
+
+sequence and its total cost are explicitly indicated for clarity. This schematic captures the essential structure of the
+TSP as a combinatorial optimization problem on a complete weighted graph.
+G = TSP tour
+= [c1, c2, c3, c4, c5, c6, c1]
+Cost = 28
+′
+
+1
+
+5
+7
+
+7
+
+c5
+
+c6
+
+6
+
+c5
+
+1
+
+c4
+
+c1
+
+7
+
+1
+
+9
+
+c4
+
+c2
+
+8
+
+4
+
+7
+
+c1
+
+4
+
+c3
+
+c2
+
+7
+
+c3
+
+2
+
+G = Hamiltonian cycle
+
+c6
+
+Figure 1. Example of TSP Tour
+
+The TSP can be formulated mathematically as follows:
+
+minimize
+
+N
+N X
+X
+
+f (x) =
+
+dij xij
+
+(1)
+
+i=1 j=1
+j̸=i
+
+subject to
+
+N
+X
+
+xij = 1,
+
+∀i ∈ {1, . . . , N },
+
+(2)
+
+xij = 1,
+
+∀j ∈ {1, . . . , N },
+
+(3)
+
+∀ S ⊂ V, S ̸= ∅,
+
+(4)
+
+∀ i, j ∈ {1, . . . , N }.
+
+(5)
+
+j=1
+j̸=i
+N
+X
+i=1
+i̸=j
+
+XX
+
+xij ≤ |S| − 1,
+
+i∈S j∈S
+
+xij ∈ {0, 1},
+
+Here, X represents the search space, xij is a binary decision variable that equals 1 if edge (i, j) is part of the tour
+and 0 otherwise. The objective function (1) minimizes the total cost of the route. Constraints (2) and (3) guarantee
+that each city is visited exactly once, while constraint (4) eliminates the possibility of subtours, ensuring a single
+continuous tour.
+
+4. Q-learning-Assisted Simulated Annealing
+This section describes the proposed hybrid algorithm that integrates Q-learning into the SA framework. After
+providing a brief introduction to the fundamentals of SA metaheuristic, we proceed to describe the Q-learning
+mechanism. Lastly, we explain the proposed hybrid method QLSA and its extended version, which allows Qlearning to dynamically guide the search process in SA.
+4.1. Simulated Annealing Metaheuristic
+SA, first introduced by Kirkpatrick et al. [2], is a widely used probabilistic metaheuristic for solving complex
+combinatorial optimization problems. The method takes inspiration from the annealing process in metallurgy,
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3710
+
+Q-LEARNING-ASSISTED SIMULATED ANNEALING FOR TSP
+
+where a material is heated and then cooled slowly to minimize imperfections and reach a stable crystalline state.
+In an optimization context, this analogy translates into iteratively exploring the solution space while occasionally
+accepting worse solutions, which helps the algorithm avoid becoming trapped in poor-quality local optima.
+Formally, let S denote the search space and f : S → R the objective function to be minimized.
+Starting from an initial solution s ∈ S, the algorithm generates a candidate solution s′ ∈ N (s) from its
+neighborhood. The change in cost is then computed as ∆f = f (s′ ) − f (s), and the candidate solution is accepted
+according to the Metropolis criterion defined as follows:
+
+1
+if ∆f ≤ 0,
+(6)
+P (∆f, T ) =
+
+exp − ∆f
+if
+∆f
+>
+0
+T
+Where T is the current temperature. The temperature is gradually decreased according to a cooling schedule
+T ← ϕ(T ). This mechanism balances exploration (at higher temperatures) and exploitation (as T decreases),
+enabling SA to gradually refine solutions while preserving search diversity.
+In the context of the Traveling Salesman Problem (TSP), the search space S consists of all possible tours visiting
+each city exactly once, and the objective function f (s) is the total length of the tour. Neighborhoods are typically
+generated using 2-opt or 3-opt operators, which swap edges or subsequences of the tour. While SA is valued for its
+ease of use and adaptability, its performance is highly dependent on parameters like the starting temperature, the
+cooling schedule, and the use of fixed neighborhood operators, which may restrict its flexibility.
+In our work, we employ the 2-opt Metropolis operator, a variant of the classical 2-opt heuristic in which the
+Metropolis acceptance criterion is incorporated. This modification allows swap moves to be accepted even when
+they do not yield an immediate improvement, thereby enhancing exploration. The acceptance probability of a swap
+move is given by the Metropolis criterion 7.
+
+
+∆
+P = exp − ′
+(7)
+T
+Algorithme 1: 2-opt Metropolis Operator
+Input: Current solution x, global best solution x∗ , temperature T ′ , number of cities n
+Initialize new solution x′ ;
+Compute Hamming distance: V ← dH (x, x∗ );
+for v ← 1 to V do
+Randomly select an index p;
+for i ← p to n − 1 do
+for j ← i + 2 to n − 1 do
+Compute cost change:
+
+ 
+
+∆ ← d(xi , xj ) + d(xi+1 , xj+1 ) − d(xi , xi+1 ) + d(xj , xj+1 )
+if ∆ < 0 then
+Accept swap and update x by reversing segment (i + 1, j);
+end
+else
+Accept swap with probability P = exp(−∆/T ′ );
+if Accepted then
+Update x by reversing segment (i + 1, j);
+end
+end
+end
+end
+end
+return x (updated solution) ;
+
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+N. ADIL, F. EDDAOUDI, H. LAKHBAB AND M. NAIMI
+
+3711
+
+Where T ′ is the current temperature and ∆ represents the change in cost induced by the 2-opt swap. For a swap
+between edges (xi , xi+1 ) and (xj , xj+1 ), the cost difference is computed as:
+
+ 
+
+∆ = d(xi , xj ) + d(xi+1 , xj+1 ) − d(xi , xi+1 ) + d(xj , xj+1 )
+(8)
+where d(a, b) denotes the weight (or distance) between nodes a and b. To enhance its effect, the 2-opt Metropolis
+operator is applied V times at each iteration, where V is determined as the Hamming distance between the current
+solution x and the global best solution x∗ . This adaptive application strategy increases the intensity of local search
+when the current solution significantly differs from the global best, while reducing it when the solutions become
+similar.
+The pseudocode for the 2-opt Metropolis operator is given in Algorithm 1. When integrated into the SA
+framework, this operator naturally produces both improving (∆ < 0) and non-improving (∆ ≥ 0) solutions,
+aligning well with the algorithm’s search strategy. Moreover, as the acceptance decision depends on the temperature
+parameter that decreases over iterations, the operator progressively shifts the search toward exploitation in the later
+stages.
+The pseudocode for the SA method is given in Algorithm 2.
+Algorithme 2: Classical SA with 2-opt Metropolis
+Input: Initial solution x, initial temperature T0 , cooling rate α ∈ (0, 1), stopping temperature Tmin
+Output: Best-found solution x∗
+Initialize best solution: x∗ ← x;
+Set current temperature: T ← T0 ;
+while T > Tmin do
+Generate a neighbor x′ by applying a 2-opt Metropolis move to x;
+Compute cost difference: ∆ ← f (x′ ) − f (x);
+if ∆ < 0 then
+Accept neighbor: x ← x′ ;
+end
+else
+Accept neighbor with probability P = exp(−∆/T );
+if Accepted then
+x ← x′ ;
+end
+end
+if f (x) < f (x∗ ) then
+Update best solution: x∗ ← x;
+end
+Update temperature: T ← α · T ;
+end
+return x∗ ;
+
+4.2. Q-learning Mechanism
+Q-learning (QL) [8, 29] is a model-free reinforcement learning algorithm that learns an optimal policy for selecting
+actions in a Markov Decision Process (MDP) by iteratively refining an action-value function, or Q-function. Unlike
+model-based methods, it does not require prior knowledge of state transition probabilities, making it particularly
+suitable for guiding metaheuristics, where problem dynamics are often complex and unpredictable.
+The Q-value for a state-action pair (s, a) is updated according to the Bellman equation:
+
+
+′ ′
+Q(s, a) ← Q(s, a) + α r + γ max
+Q(s
+,
+a
+)
+−
+Q(s,
+a)
+′
+a
+
+(9)
+
+where α ∈ (0, 1] is the learning rate, γ ∈ [0, 1] is the discount factor, r is the immediate reward after taking action
+a in state s, and s′ is the resulting next state. In this framework, the components of the Q-learning algorithms are:
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3712
+
+Q-LEARNING-ASSISTED SIMULATED ANNEALING FOR TSP
+
+• States (S): Represent features of the search process, such as current solution quality, temperature level, or
+iteration stage.
+• Actions (A): Define decisions available to the agent, such as selecting a specific neighborhood operator
+(2-opt, 3-opt) or adjusting algorithm parameters like the cooling rate.
+• Reward (R): Provides feedback based on the change in the objective value.
+• Policy (π): Determines how actions are selected.
+
+Figure 2. Q-learning process
+
+Figure 2 represents the Q-learning process. This iterative learning process allows the algorithm to identify which
+actions are most advantageous in different search contexts, adapting its strategy as optimization progresses.
+4.3. The Hybrid Approach: Stateless QLSA
+The proposed QLSA algorithm integrates a stateless Q-learning mechanism into the classical SA framework,
+thereby enhancing the adaptivity of the search process. Unlike conventional SA, which explores the neighborhood
+of a single, fixed solution, QLSA employs Q-learning to dynamically select the most promising candidate solution
+(action) from a predefined set, based solely on accumulated rewards from previous selections. Once a leader
+solution is selected, a neighborhood operator is applied. In our implementation, the 2-opt Metropolis move is
+applied.
+This design choice represents a deliberate trade-off between model expressiveness and algorithmic simplicity.
+The stateless formulation significantly reduces learning complexity and avoids the need for state discretization.
+Moreover, by learning action utilities aggregated over the entire search trajectory, the proposed approach provides
+a robust and lightweight adaptive control mechanism that integrates seamlessly into the Simulated Annealing
+framework without introducing additional hyperparameters or structural dependencies.
+Nevertheless, this simplification inherently limits the algorithm’s ability to learn context-dependent policies. In
+particular, the relative usefulness of candidate solutions may vary across different phases of the annealing process
+(e.g., high-temperature exploration versus low-temperature exploitation), which cannot be explicitly captured by a
+stateless policy. As such, the proposed QLSA should be viewed as a first-order adaptive mechanism.
+In the next section, we will propose a basic stateful version that extends this version.
+Let C = {c1 , c2 , c3 , c4 } denote the set of candidate actions available for selection at each iteration:
+• c1 : the current solution,
+• c2 : the global best solution,
+• c3 : a randomly generated solution at each iteration that can be seen as a diversity agent,
+• c4 : a new solution generated using the double bridge kick operator.
+The double-bridge kick consists of selecting four non-adjacent edges in the current tour and reconnecting the
+resulting segments in a different order, thereby producing a new tour that lies outside the basin of attraction
+of the current local optimum. Unlike small neighborhood moves, this operator performs a substantial structural
+modification of the solution while preserving tour feasibility. It was originally introduced in the context of largestep Markov chains for the TSP [31] and later became a standard diversification mechanism with its ability to
+induce long-range transitions in the solution space while maintaining computational efficiency.
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+N. ADIL, F. EDDAOUDI, H. LAKHBAB AND M. NAIMI
+
+3713
+
+In this stateless formulation, each action a ∈ C maintains an associated Q-value Q(a), which is iteratively
+updated according to the following formula:
+
+Q(at ) ← Q(at ) + α [rt − Q(at )]
+
+(10)
+
+Where α is the learning rate and rt denotes the immediate reward, defined as the improvement in objective value
+(i.e., cost reduction) obtained after applying the neighborhood operator to the selected action at .
+We experiment with two classical policies to resolve the exploration–exploitation dilemma:
+
+• ε-Greedy: With probability 1 − ε, the policy selects arg maxa∈C Q(a); with probability ε, it chooses a
+random action uniformly. This approach is simple, computationally efficient, and widely adopted in Qlearning [23].
+• Softmax (Boltzmann) policy: Assign a probability to each action:
+
+exp (Q(a)/τ )
+′
+a′ ∈C exp (Q(a )/τ )
+
+P (a) = P
+
+(11)
+
+where τ (temperature) governs the exploration intensity. As τ → 0, softmax behaves greedily; as τ → ∞, it
+approximates uniform random selection. This policy is grounded in the Boltzmann distribution tradition and
+can produce smoother, value-aware exploration than ϵ-greedy. In our work, we use the same temperature as
+in the SA, τ = T .
+
+These two action-selection policies are widely adopted for balancing exploration and exploitation [30, 23].
+The ε-Greedy approach is simple, computationally inexpensive, and provides direct control over the exploration
+rate through a single parameter, ε, making it particularly effective when the number of available actions is small.
+In contrast, the Softmax policy offers a value-based probabilistic selection mechanism that naturally smooths the
+transition between exploration and exploitation. By tuning its temperature parameter analogous to the cooling
+schedule in SA, Softmax enables a gradual shift towards exploitation without abrupt behavioral changes.
+In this study, both policies are employed to examine how different exploration dynamics influence QLSA. Using
+both allows for a comparison between a more decisive, parameter-driven strategy (ε-Greedy) and a smoother,
+temperature-controlled one (Softmax), thereby offering deeper insights into the trade-offs between aggressive and
+tempered exploration in combinatorial optimization. It is worth mentioning that our primary aim in this work is to
+demonstrate the viability of incorporating Q-learning into SA through simple, well-established policies. Although
+more advanced exploration methods could potentially enhance performance, their inclusion could also increase
+algorithmic complexity. The pseudocode for QLSA is provided in Algorithm 3. Also, the corresponding flowchart
+is shown in Figure 3 for more clarity.
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3714
+
+Q-LEARNING-ASSISTED SIMULATED ANNEALING FOR TSP
+
+Algorithme 3: Stateless Q-learning-Assisted SA (QLSA)
+Input: Initial solution x0 , candidate set size |C| = 4, initial temperature T0 , cooling schedule, learning rate α,
+policy parameters (ε or τ )
+Output: Best solution found x∗
+Initialize Q(a) ← 0 for all a ∈ C;
+Initialize x ← x0 , x∗ ← x0 , T ← T0 ;
+while stopping criterion not met do
+Select action at ∈ C using the selected policy (ε-greedy or softmax);
+Apply neighborhood operator (2-opt) to at to generate x′ with cost f (x′ );
+Compute reward rt ← f (x) − f (x′ ); 
+
+Update Q-value: Q(at ) ← Q(at ) + α rt − Q(at ) ;
+if Metropolis acceptance(f (x′ ), f (x), T ) then
+x ← x′ ;
+if f (x′ ) < f (x∗ ) then
+x∗ ← x′ ;
+end
+end
+Update temperature T ← cooling(T );
+end
+return x∗
+
+Start
+
+Set Q(a) ← 0 for a ∈ C;
+Set x ← x0 , x∗ ← x0 , T ← T0
+
+Yes
+
+Stopping
+criterion met?
+No
+Update C = {c1 , c2 , c3 , c4 }
+
+Select action at ∈ C
+(policy: ε-greedy or softmax)
+
+Apply 2-opt Metropolis to at
+to get x′ with cost f (x′ )
+
+Compute reward rt ← f (x) − f (x′ )
+
+Q(at ) ← Q(at ) + α [ rt − Q(at ) ]
+
+Metropolis
+accept?
+
+Yes
+
+x ← x′ ;
+if f (x′ ) < f (x∗ ) then x∗ ← x′
+
+No
+Update temperature: T ← cooling(T )
+
+Return x∗
+
+Figure 3. Flowchart of the QLSA algorithm.
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+N. ADIL, F. EDDAOUDI, H. LAKHBAB AND M. NAIMI
+
+3715
+
+4.4. The Hybrid Approach: State-based QLSA (SB-QLSA)
+The stateless version of the Q-learning-assisted Simulated Annealing algorithm (QLSA) learns a global preference
+over candidate leaders without explicitly considering the current phase of the search process. However, in Simulated
+Annealing, the search dynamics are strongly influenced by the environment’s transition from exploration to
+exploitation. Ignoring this information may limit the learning mechanism’s ability to adapt its behavior throughout
+the optimization process.
+To address this limitation, we propose a basic state-based variant of QLSA, denoted SB-QLSA, in which the Qlearning policy is conditioned on the current search state. The objective is to enable the algorithm to learn different
+leader-selection strategies depending on whether the search is in an exploratory or exploitative phase.
+Defining an informative state space for the Q-learning component of QLSA proved to be a nontrivial design
+choice. A natural option would be to distinguish states based on the temperature level (e.g., high versus
+low temperature). However, this approach is not well-suited to the present algorithmic setting. In our SA
+implementation, the temperature follows a strictly decreasing schedule without reheating, meaning that the
+search deterministically transitions from exploration (high temperature) to exploitation (low temperature). As
+a consequence, temperature-based states would be largely time-driven and weakly informative, providing little
+feedback on the actual search dynamics or solution landscape encountered by the algorithm. Thus, we instead
+define the states based on solution quality diversity. Let πt denote the current solution at iteration t, and let πtbest
+denote the best solution found so far by the algorithm. The search state is defined based on the Hamming distance
+between these two solutions. For a problem of size n, the Hamming distance is given by:
+dH (πt , πtbest ) =
+
+n
+X
+
+
+I πt (i) ̸= πtbest (i) ,
+
+i=1
+
+where I(·) is the indicator function. The set of states is defined as
+S = {s1 , s2 },
+where s1 corresponds to a diversified search state and s2 corresponds to an intensified search state. The current
+state at iteration t is determined as follows:
+(
+s1 , if dH (πt , πtbest ) > n2 ,
+s(t) =
+s2 , otherwise.
+This state definition enables the learning mechanism to distinguish between phases where the current solution is
+far from the best-known solution and phases where the search is concentrated in its neighborhood.
+The action space A remains identical to that of QLSA and corresponds to the set of candidate leader solutions
+used to guide neighborhood exploration. In SB-QLSA, the Q-table is defined as a state–action value function:
+Q : S × A → R.
+At each iteration, an action (leader) is selected according to a state-dependent policy (ε-greedy or softmax), and
+the resulting reward is computed based on the improvement in solution quality, just like in QLSA.
+The Q-values are updated using the standard Q-learning update rule:
+
+
+′
+Q(st , at ) ← Q(st , at ) + α rt + γ max
+Q(st+1 , a ) − Q(st , at ) ,
+′
+a ∈A
+
+where α is the learning rate, γ is the discount factor, and rt denotes the reward obtained after selecting action at in
+state st .
+The overall structure of SB-QLSA follows that of QLSA, with the key difference being that both leader selection
+and Q-value updates are conditioned on the current search state. This allows the learning mechanism to adapt its
+behavior dynamically as the algorithm transitions from exploration to exploitation, while preserving the simplicity
+and generality of the original QLSA framework. The pseudo code of SB-QLSA is as follows:
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3716
+
+Q-LEARNING-ASSISTED SIMULATED ANNEALING FOR TSP
+
+Algorithme 4: State-Based Q-learning-Assisted SA (SB-QLSA)
+Input: Initial solution x0 , candidate set size |C| = 4, initial temperature T0 , cooling schedule, learning rate
+α, discount factor γ, policy parameters (ε or τ ), diversity threshold δ
+Output: Best solution found x∗
+State space: S = {0, 1} where 0 = low diversity, 1 = high diversity;
+Initialize Q(s, a) ← 0 for all s ∈ S and a ∈ C;
+Initialize x ← x0 , x∗ ← x0 , T ← T0 ;
+while stopping criterion not met do
+Update candidate set C = {c1 , c2 , c3 , c4 };
+// Compute current state from solution diversity
+Compute diversity measure Dt using Hamming distance between x and x∗ ;
+Set st ← I[Dt ≥ δ];
+Select action at ∈ C using the selected policy on Q(st , ·) (either ε-greedy or softmax with τ );
+Apply neighborhood operator (2-opt Metropolis) to at to generate x′ with cost f (x′ );
+Compute reward rt ← f (x) − f (x′ );
+// Compute next state
+Compute diversity measure Dt+1 and set st+1 ← I[Dt+1 ≥ δ];
+Update Q-value:
+h
+i
+Q(st , at ) ← Q(st , at ) + α rt + γ max Q(st+1 , a) − Q(st , at )
+a∈C
+
+if Metropolis acceptance(f (x′ ), f (x), T ) then
+x ← x′ ;
+if f (x′ ) < f (x∗ ) then
+x∗ ← x′ ;
+end
+end
+Update temperature T ← cooling(T );
+end
+return x∗ ;
+
+5. Experimental Results and Discussion
+5.1. Benchmark Instances
+The proposed QLSA algorithms were evaluated on a set of 17 symmetric Traveling Salesman Problem (TSP)
+instances from TSPLIB [1] spanning small, medium and moderately large sizes and a mix of Euclidean and
+geographic metrics.
+Table 1 represents each instance and its best-known values for reference.
+All experiments were executed on a 64 bit Linux operating system, equipped with an Intel Xeon Gold 6130 CPU
+at 2.10 GHz, within a virtual machine utilizing the computational resources of HPC-MARWAN (hpc.marwan.ma),
+provided by the National Center for Scientific and Technical Research (CNRST), Rabat, Morocco. The used
+programming language is Python 3.11.5 with NumPy/Pandas for data handling. Besides, the TSPLIB95 Python
+library was used for working with TSPLIB 95 files.
+
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3717
+
+N. ADIL, F. EDDAOUDI, H. LAKHBAB AND M. NAIMI
+
+Table 1. TSPLIB instances with size N , distance metric, and Best Known Solution (BKS).
+
+#
+
+Name
+
+N
+
+Metric
+
+BKS
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+
+ulysses16
+gr17
+ulysses22
+gr24
+bayg29
+bays29
+dantzig42
+swiss42
+gr48
+hk48
+eil51
+berlin52
+st70
+pr76
+eil76
+rat99
+eil101
+
+16
+17
+22
+24
+29
+29
+42
+42
+48
+48
+51
+52
+70
+76
+76
+99
+101
+
+GEO
+EXPLICIT
+GEO
+EXPLICIT
+EXPLICIT
+EXPLICIT
+EXPLICIT
+EXPLICIT
+EXPLICIT
+EXPLICIT
+EUC 2D
+EUC 2D
+EUC 2D
+EUC 2D
+EUC 2D
+EUC 2D
+EUC 2D
+
+6859
+2085
+7013
+1272
+1610
+2020
+699
+1273
+5046
+11461
+426
+7542
+675
+108159
+538
+1211
+629
+
+5.2. Parameters tuning
+To ensure a fair comparison across all variants, the parameters of the simulated annealing (SA) component were
+held constant. A linear cooling schedule was adopted, defined as follows:
+T = Tmax − [(Tmax − Tmin ) ∗ k]/Nmax .
+
+(12)
+
+where Tk is the temperature at iteration k, T0 is the initial temperature, Tmin is the minimum temperature equal
+to 0.001, and Nmax is the maximum number of iterations. The initial temperature T0 was calibrated to half the
+length of the initial tour.
+Parameter tuning focused exclusively on the Q-learning components. The performance of the variants of our
+proposed QLSA algorithm is influenced by four tunable parameters. To determine appropriate values for these
+parameters, the well-known berlin52 instance from the TSPLIB benchmark was selected as the test problem for
+all tuning experiments. In each experiment, the algorithm was terminated when the maximum number of iterations
+was reached.
+The first experiment focused on the learning rate α. This parameter was tested across the range 0.05, 0.1, . . . , 1.
+The corresponding row in Table 2 presents the results for the QLSAs and SB − QLSAs variants. The results
+indicate that the lowest average tour length over 10 runs for QLSAs was achieved at α = 0.3. In contrast,
+SB − QLSAs yielded its best average performance at α = 0.6.
+Building on these findings, the second experiment tuned the discount factor γ, tested over the values
+0.05, 0.1, . . . , 1.0. To isolate the effect of γ, fixed values of α were adopted based on the previous experiment:
+α = 0.3 for QLSAs and α = 0.6 for SB − QLSAs . Analysis of the γ row in Table 2 reveals that the optimal
+setting differs between the two variants: γ = 1.0 produced the best performance for QLSAs , whereas γ = 0.8 was
+superior for SB − QLSAs .
+
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3718
+
+Q-LEARNING-ASSISTED SIMULATED ANNEALING FOR TSP
+
+Table 2. Comparison of mean tour lengths and standard deviations for different values of the learning rate α and discount
+factor γ in the QLSAs and SB-QLSAs variants
+Mean
+
+Std
+
+Parameters
+
+Values
+QLSAs
+
+SB-QLSAs
+
+QLSAs
+
+SB-QLSAs
+
+α
+
+0.05
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+1
+
+7803.1
+7819.3
+7750.8
+7702.1
+7761.5
+7805.8
+7873.7
+7728.4
+7834.2
+7832.9
+7797.5
+
+7805.5
+7786.4
+7792.4
+7779.7
+7850.9
+7798.8
+7733.7
+7739.4
+7752.0
+7763.4
+7811.7
+
+130.2
+135.3
+113.1
+113.9
+111.7
+150.3
+136.8
+115.5
+135.4
+152.9
+142.8
+
+111.0
+168.8
+193.6
+118.1
+110.4
+145.7
+109.9
+134.0
+174.8
+153.5
+121.0
+
+γ
+
+0.05
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+1
+
+7796.8
+7890.5
+7819.7
+7864.8
+7809.6
+7819.2
+7795.2
+7814.8
+7824.0
+7799.9
+7778.7
+
+7776.3
+7740.6
+7749.4
+7857.9
+7825.9
+7762.9
+7785.8
+7696.9
+7738.9
+7836.0
+7819.0
+
+110.8
+106.0
+81.2
+145.1
+122.2
+105.1
+135.4
+152.1
+136.2
+181.2
+118.3
+
+134.4
+134.7
+125.6
+150.6
+173.9
+107.1
+95.4
+83.6
+106.7
+151.3
+119.1
+
+The third experiment examined the exploration parameter ϵ (commonly associated with an ϵ-greedy policy),
+tested in the range 0.05 to 1.0. According to the results reported in the ϵ row of Table 3, both QLSAe and
+SB − QLSAe achieved their lowest average tour lengths when ϵ = 1.0.
+Finally, the last tuning experiment investigated the Des parameter. Three discrete values were evaluated: 0.001,
+0.005, and 0.01. The outcomes summarized in Table 3 demonstrate that Des = 0.001 consistently delivered the best
+performance across the tested variants.
+Table 3. Comparison of mean tour lengths and standard deviations for different values of the learning rate α and discount
+factor γ in the QLSAe and SB-QLSAe variants
+
+Parameters
+
+Epsilon
+
+Des
+
+Mean
+
+Values
+
+Std
+
+QLSAe
+
+SB-QLSAe
+
+QLSAe
+
+SB-QLSAe
+
+0.05
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+1
+
+8140
+8152.2
+8004.5
+7920.8
+7939.3
+7895.5
+7966.9
+7873.1
+7947.4
+7850.9
+7776.6
+
+8014.1
+8169.5
+7930.2
+7965.6
+7951
+7937
+7861.1
+7836.6
+7842.7
+7902.3
+7796.8
+
+237.7
+264.27
+201.24
+153.47
+206.24
+259.31
+183.38
+194.46
+101.41
+133.70
+103.30
+
+303.2
+379.64
+190.31
+199.21
+248.74
+189.63
+234.36
+121.76
+203.87
+177.79
+189.97
+
+0.001
+0.005
+0.01
+
+7907.7
+8200.5
+8266.4
+
+7860.2
+8050.2
+8352.4
+
+120.38
+304.01
+654.36
+
+186.85
+343.56
+507.00
+
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3719
+
+N. ADIL, F. EDDAOUDI, H. LAKHBAB AND M. NAIMI
+
+These tuned parameter values were subsequently adopted for all comparative experiments involving the respective QLSA
+variants on larger or multiple TSPLIB instances.
+
+5.3. Experimental Setup
+In our comparative study, each algorithm was executed multiple times per benchmark instance to ensure a robust statistical
+evaluation.
+Specifically, the main performance table reports results from 10 independent runs for each instance. For each run, we
+recorded the shortest tour length obtained and the computational time required to achieve this best solution. From these runs,
+we computed the following statistics for each algorithm and instance pair:
+• Best: the smallest tour length observed across all runs.
+• Worst: the largest tour length observed across all runs.
+• Mean: the average tour length over all runs.
+• Std: the standard deviation of tour lengths, reflecting result stability.
+• Gap: the percentage deviation from the Best Known Solution (BKS) reported in TSPLIB.
+The Gap index is calculated as:
+Average − BKS
+× 100
+(13)
+BKS
+where Average is the mean tour length over all runs and BKS is the best-known solution for the corresponding instance.
+This metric provides a normalized measure of solution quality across instances with different scales. In addition to the
+mean gap, we also report the minimum gap (computed from the best tour length found among all runs), allowing a more
+precise evaluation of each algorithm’s peak performance.
+Furthermore, to statistically assess the significance of the observed differences in performance, three non-parametric
+tests were conducted: the Wilcoxon signed-rank test, the Sign test, and the Friedman test. These tests allow for robust
+comparisons between algorithms without assuming normality in the performance distributions, thus providing more reliable
+insights into whether observed performance differences are statistically significant.
+Gap(%) =
+
+5.4. Performance Comparison with SA
+Following the experimental design and the parameter settings outlined in Sections 5.1 and 5.2, we carried out the experiment
+on the selected TSP instances from the TSPLIB database.
+The detailed results for all tested instances are reported in Table 4.A lower values for the best, worst, and mean metrics
+reflect a stronger search capability of the algorithm. In the std row, smaller values denote greater stability and consistency
+in producing high-quality solutions across different runs. Bold values mark the best performance for each metric among the
+compared algorithms.
+Table 4. Comparison statistics between SA, QLSAϵ , QLSAS , SB-QLSAϵ and SB-QLSAS
+Instances
+
+BK
+
+Stat
+
+SA
+
+QLSAS
+
+QLSAϵ
+
+SB-QLSAS
+
+SB-QLSAϵ
+
+ulysses16
+
+6859
+
+min
+mean
+std
+max
+
+6889
+7238.2
+351.398
+7886
+
+6859
+6866.2
+5.203
+6870
+
+6859
+6879.4
+22.147
+6912
+
+6859
+6866.9
+12.714
+6890
+
+6859
+6880.7
+22.146
+6913
+
+gr17
+
+2085
+
+min
+mean
+std
+max
+
+2149
+2347.1
+221.352
+2746
+
+2085
+2090.5
+6.133
+2103
+
+2085
+2092.9
+14.114
+2130
+
+2085
+2090.0
+10.801
+2120
+
+2085
+2090.7
+6.783
+2103
+
+ulyssess22
+
+7013
+
+min
+mean
+std
+max
+
+7132
+7670.0
+453.543
+8506
+
+7013
+7056.5
+39.334
+7116
+
+7013
+7084.1
+49.088
+7186
+
+7013
+7035.1
+38.651
+7131
+
+7019
+7089.4
+52.239
+7170
+
+gr24
+
+1272
+
+min
+mean
+std
+max
+
+1286
+1481.6
+123.098
+1688
+
+1272
+1290.8
+18.268
+1323
+
+1272
+1297.9
+18.941
+1326
+
+1272
+1291.1
+16.589
+1326
+
+1272
+1292.0
+16.839
+1322
+
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3720
+
+Q-LEARNING-ASSISTED SIMULATED ANNEALING FOR TSP
+
+bayg29
+
+1610
+
+min
+mean
+std
+max
+
+1700
+1897.6
+102.378
+2020
+
+1610
+1648.4
+26.588
+1702
+
+1620
+1664.9
+27.188
+1723
+
+1610
+1632.7
+23.362
+1688
+
+1620
+1655.6
+27.330
+1690
+
+bays29
+
+2020
+
+min
+mean
+std
+max
+
+2095
+2274.6
+127.509
+2465
+
+2028
+2045.0
+18.227
+2082
+
+2026
+2060.1
+43.565
+2164
+
+2020
+2041.4
+21.813
+2076
+
+2020
+2059.9
+38.083
+2122
+
+dantzig42
+
+699
+
+min
+mean
+std
+max
+
+771
+829.7
+31.945
+882
+
+699
+714.7
+11.795
+740
+
+699
+736.0
+19.905
+771
+
+713
+730.2
+9.953
+745
+
+699
+726.9
+18.882
+750
+
+swiss42
+
+1273
+
+min
+mean
+std
+max
+
+1318
+1457.6
+86.413
+1617
+
+1286
+1323.3
+31.263
+1373
+
+1286
+1333.7
+36.966
+1372
+
+1287
+1315.4
+23.899
+1366
+
+1288
+1328.5
+27.989
+1373
+
+gr48
+
+5046
+
+min
+mean
+std
+max
+
+5222
+5757.4
+325.596
+6212
+
+5087
+5215.0
+99.962
+5435
+
+5157
+5289.6
+100.879
+5421
+
+5049
+5163.5
+88.295
+5345
+
+5058
+5221.1
+116.996
+5468
+
+hk48
+
+11461
+
+min
+mean
+std
+max
+
+11470
+12944.1
+854.589
+14790
+
+11470
+11809.2
+179.815
+12043
+
+11711
+11974.7
+269.270
+12588
+
+11640
+11847.3
+142.963
+12038
+
+11474
+11867.3
+325.515
+12654
+
+eil51
+
+426
+
+min
+mean
+std
+max
+
+429
+477.1
+22.043
+501
+
+432
+441.2
+6.033
+452
+
+427
+442.0
+9.055
+450
+
+430
+439.6
+9.902
+464
+
+427
+438.2
+9.705
+455
+
+berlin52
+
+7542
+
+min
+mean
+std
+max
+
+8189
+8764.6
+478.212
+9636
+
+7652
+7810.4
+126.115
+8087
+
+7590
+7872.0
+194.412
+8152
+
+7591
+7815.9
+140.420
+7999
+
+7695
+7894.0
+160.868
+8207
+
+st70
+
+675
+
+min
+mean
+std
+max
+
+712
+752.3
+22.85
+777
+
+688
+709.5
+16.92
+735
+
+686
+707.1
+16.28
+731
+
+692
+708.4
+11.3
+726
+
+698
+726.5
+18.8
+759
+
+pr76
+
+108159
+
+min
+mean
+std
+max
+
+114938
+120732.1
+4032.374
+128401
+
+109733
+112449.4
+1669.166
+114927
+
+111952
+113407.4
+1641.900
+117571
+
+109990
+113728.5
+2401.576
+117652
+
+108809
+113615.6
+3525.411
+119996
+
+eil76
+
+538
+
+min
+mean
+std
+max
+
+565
+599.9
+24.893
+640
+
+551
+562.9
+9.550
+583
+
+553
+566.5
+6.241
+574
+
+549
+558.9
+7.838
+572
+
+558
+571.8
+10.581
+591
+
+rat99
+
+1211
+
+min
+mean
+std
+max
+
+1348
+1428.9
+71.6
+1536
+
+1249
+1298.2
+40.9
+1377
+
+1231
+1282.3
+34.46
+1342
+
+1241
+1286.7
+23.8
+1315
+
+1273
+1322.0
+56.3
+1463
+
+eil101
+
+629
+
+min
+mean
+std
+max
+
+644
+686.3
+34.42
+747
+
+643
+665.9
+13.40
+686
+
+641
+666.9
+18.48
+701
+
+650
+664.4
+11.9
+682
+
+652
+670.1
+15.37
+700
+
+Table 4 provides a comprehensive comparison between the classical Simulated Annealing (SA) and the various Qlearning-assisted extensions. On the whole, the best average performance (mean) is attained by the state-based variants,
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3721
+
+N. ADIL, F. EDDAOUDI, H. LAKHBAB AND M. NAIMI
+
+specifically SB-QLSAS and SB-QLSAϵ , which outperform the standard SA in all 17 benchmark cases. Notably, SB-QLSAS
+achieves the best mean tour length in 8 instances, while the standard QLSAS remains competitive in smaller problems. This
+supports the hypothesis that integrating the diversity-based state into the reinforcement learning loop creates a highly efficient
+search mechanism capable of providing high-quality solutions consistently.
+Regarding the best-case performance (min), the Q-learning hybrids almost reached or equaled the Best Known (BK) values
+in almost every instance, whereas the classical SA struggled to converge to the BK in 16 out of 17 cases. Stability-wise, the
+state-based extensions show a marked improvement; SB-QLSAS recorded the lowest standard deviation (std) in 10 out of
+17 instances, proving its superior reliability. This is particularly evident in complex landscapes like gr48 and hk48, where
+the diversity-aware policy prevents the erratic behavior observed in the classical SA.
+Despite SA showing slightly more competitive results on larger instances like pr76 compared to its own performance
+on small instances, it still suffers from high variability and significantly higher mean costs. The results indicate that while
+Q-learning integration is superior in terms of robustness, the SB-QLSA variants mitigate the risk of losing search efficiency
+on rugged landscapes by adaptively balancing exploration and exploitation through the diversity threshold δ.
+Finally, to assess the statistical significance of the observed differences, non-parametric tests were performed. Table 5
+reports the results of the statistical comparison between the considered algorithms over all test instances. The Wilcoxon
+signed-rank test and the Sign test were used to assess pairwise differences in performance, while the Friedman test was
+applied to compare all methods simultaneously. In the table, “Wins(A)” and “Wins(B)” denote the number of instances on
+which algorithm A or B achieved better performance, respectively, and the average ranks correspond to the mean Friedman
+ranks, where lower values indicate better performance.
+
+Table 5. Non parametric statistical comparison
+Comparison
+
+Wilcoxon p
+
+Sign p
+
+Wins(A)
+
+Wins(B)
+
+Ties
+
+Avg. rank A/B
+
+QLSAs vs QLSAϵ
+SA vs QLSAϵ
+SA vs QLSAs
+SA vs SB-QLSAs
+SA vs SB-QLSAϵ
+QLSAs vs SB-QLSAϵ
+QLSAϵ vs SB-QLSAs
+SB-QLSAs vs SB-QLSAϵ
+QLSAs vs SB-QLSAs
+QLSAϵ vs SB-QLSAϵ
+
+0.0013428
+1.5259e-05
+1.5259e-05
+1.5259e-05
+1.5259e-05
+7.6294e-05
+0.0093384
+0.010986
+0.37782
+1
+
+0.0023499
+1.5259e-05
+1.5259e-05
+1.5259e-05
+1.5259e-05
+0.00027466
+0.012726
+0.012726
+0.33231
+1
+
+15
+0
+0
+0
+0
+16
+3
+14
+6
+8
+
+2
+17
+17
+17
+17
+1
+14
+3
+11
+9
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+1.824 / 3.235
+5.000 / 3.235
+5.000 / 1.824
+5.000 / 1.706
+5.000 / 3.235
+1.824 / 3.235
+3.235 / 1.706
+1.706 / 3.235
+1.824 / 1.706
+3.235 / 3.235
+
+Friedman χ2 = 48.7529, p = 6.5745276e − 10, N = 17, k = 5
+Avg. ranks (lower is better): SB-QLSAs : 1.706, QLSAs : 1.824, QLSAϵ : 3.235, SB-QLSAϵ : 3.235, SA: 5.000
+
+From the table, the Friedman test indicates a statistically significant difference among the algorithms (χ2 = 48.7529,
+p = 6.57 × 10−10 ), confirming that the observed performance variations are unlikely to be due to random fluctuations. The
+average rank analysis shows that SB-QLSAs achieves the best overall ranking (1.706), followed closely by QLSAs (1.824),
+while QLSAϵ and SB-QLSAϵ obtain intermediate ranks (3.235), and classical SA ranks last (5.000).
+Pairwise comparisons further support these observations. Both QLSA variants significantly outperform SA, as indicated
+by very small p-values in both the Wilcoxon and Sign tests, and by the fact that SA does not outperform any learning-based
+method on any instance. Similarly, SB-QLSAs significantly outperforms SA on all instances, confirming the effectiveness
+of incorporating learning into the search process.
+Comparisons among learning-based methods provide additional insight. QLSAs significantly outperforms QLSAϵ (p =
+0.00134), suggesting that the softmax-based policy leads to more effective operator selection than the ϵ-greedy strategy in
+this setting. Likewise, SB-QLSAs significantly outperforms SB-QLSAϵ , indicating that this effect persists in the state-based
+formulation. More dicussion on policy comparison will be done in the next section.
+On the other hand, the comparison between QLSAs and SB-QLSAs does not show a statistically significant difference
+(p = 0.37782), suggesting that while the state-based mechanism slightly improves the average rank, its advantage over the
+stateless variant is not consistently large across all instances. Similarly, no significant difference is observed between QLSAϵ
+and SB-QLSAϵ , indicating comparable behavior for the ϵ-greedy variants.
+In summary, the incorporation of state-based Q-learning into simulated annealing yields consistent improvements in
+both solution quality and run-to-run stability. Among the tested variants, SB-QLSAS emerges as the most robust overall
+performer, particularly on more challenging instances, while the ε-greedy strategy (QLSAϵ ) remains a viable alternative for
+specific smaller benchmarks like eil51 and st70.
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3722
+
+Q-LEARNING-ASSISTED SIMULATED ANNEALING FOR TSP
+
+5.5. Policy Comparison: Softmax vs ε-greedy
+Tables 6 and 7 report the performance of the QLSA variants using two different action-selection policies: Softmax and
+ε-greedy.
+For each instance, the tables provide the best-known solution (BK), along with the minimum, mean, standard deviation,
+and maximum tour lengths obtained over multiple independent runs. To allow a normalized comparison across instances
+of different scales, the mean percentage gap relative to the best-known solution is also reported. Lower gap values indicate
+better solution quality.
+Table 6 presents the results for the stateless QLSA variants, while Table 7 reports the corresponding results for the statebased versions (SB-QLSA). In both tables, the best result for each instance is highlighted in bold. Summary row at the
+bottom provide the average gap across all instances.
+Table 6. Performance comparison of QLSA variants with mean gap to best-known solution (BK).
+Instance
+
+BK
+
+stat
+
+QLSAS
+
+ulysses16
+
+6859
+
+min
+mean
+std
+max
+
+6859
+6866.2
+5.20
+6870
+
+gr17
+
+2085
+
+min
+mean
+std
+max
+
+2085
+2090.5
+6.13
+2103
+
+7013
+
+min
+mean
+std
+max
+
+7013
+7056.5
+39.33
+7116
+
+1272
+
+min
+mean
+std
+max
+
+1272
+1290.8
+18.27
+1323
+
+1610
+
+min
+mean
+std
+max
+
+1610
+1648.4
+26.59
+1702
+
+bays29
+
+2020
+
+min
+mean
+std
+max
+
+2028
+2045.0
+18.23
+2082
+
+dantzig42
+
+699
+
+min
+mean
+std
+max
+
+699
+714.7
+11.80
+740
+
+1273
+
+min
+mean
+std
+max
+
+1286
+1323.3
+31.26
+1373
+
+5046
+
+min
+mean
+std
+max
+
+5087
+5215.0
+99.96
+5435
+
+11461
+
+min
+mean
+std
+max
+
+11470
+11809.2
+179.81
+12043
+
+ulysses22
+
+gr24
+
+bayg29
+
+swiss42
+
+gr48
+
+hk48
+
+Gap(%)
+0.10
+
+0.26
+
+0.62
+
+1.48
+
+2.39
+
+1.24
+
+2.25
+
+3.95
+
+3.35
+
+3.04
+
+QLSAϵ
+6859
+6879.4
+22.15
+6912
+2085
+2092.9
+14.11
+2130
+7013
+7084.1
+49.09
+7186
+1272
+1297.9
+18.94
+1326
+1620
+1664.9
+27.19
+1723
+2026
+2060.1
+43.56
+2164
+699
+736.0
+19.91
+771
+1286
+1333.7
+36.97
+1372
+5157
+5289.6
+100.88
+5421
+11711
+11974.7
+269.27
+12588
+
+Gap(%)
+0.30
+
+0.38
+
+1.01
+
+2.04
+
+3.41
+
+1.99
+
+5.29
+
+4.77
+
+4.83
+
+4.48
+
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3723
+
+N. ADIL, F. EDDAOUDI, H. LAKHBAB AND M. NAIMI
+
+426
+
+min
+mean
+std
+max
+
+432
+441.2
+6.03
+452
+
+7542
+
+min
+mean
+std
+max
+
+7652
+7810.4
+126.11
+8087
+
+st70
+
+675
+
+min
+mean
+std
+max
+
+688
+709.5
+16.93
+735
+
+pr76
+
+108159
+
+min
+mean
+std
+max
+
+109733
+112449.4
+1669.17
+114927
+
+538
+
+min
+mean
+std
+max
+
+551
+562.9
+9.55
+583
+
+1211
+
+min
+mean
+std
+max
+
+1249
+1298.2
+40.95
+1377
+
+629
+
+min
+mean
+std
+max
+
+643
+665.9
+13.40
+686
+
+eil51
+
+berlin52
+
+eil76
+
+rat99
+
+eil101
+
+Average Gap (%)
+
+3.57
+
+3.56
+
+5.11
+
+3.97
+
+4.63
+
+7.20
+
+5.87
+
+427
+442.0
+9.06
+450
+7590
+7872.0
+194.41
+8152
+686
+707.1
+16.29
+731
+111952
+113407.4
+1641.90
+117571
+553
+566.5
+6.24
+574
+1231
+1282.3
+34.46
+1342
+641
+666.9
+18.48
+701
+
+3.09
+
+3.76
+
+4.37
+
+4.76
+
+4.85
+
+5.30
+
+5.89
+
+6.03
+
+3.73
+
+Table 7. Performance comparison of SB-QLSA variants with mean gap to BK.
+Instance
+
+BK
+
+stat
+
+SB-QLSAS
+
+ulysses16
+
+6859
+
+min
+mean
+std
+max
+
+6859
+6866.9
+12.71
+6890
+
+gr17
+
+2085
+
+min
+mean
+std
+max
+
+2085
+2090.0
+10.80
+2120
+
+7013
+
+min
+mean
+std
+max
+
+7013
+7035.1
+38.65
+7131
+
+1272
+
+min
+mean
+std
+max
+
+1272
+1291.1
+16.59
+1326
+
+min
+mean
+std
+
+1610
+1632.7
+23.36
+
+ulysses22
+
+gr24
+
+bayg29
+
+1610
+
+Gap(%)
+0.12
+
+0.24
+
+0.32
+
+1.50
+
+1.41
+
+SB-QLSAϵ
+6859
+6880.7
+22.15
+6913
+2085
+2090.7
+6.78
+2103
+7019
+7089.4
+52.24
+7170
+1272
+1292.0
+16.84
+1322
+1620
+1655.6
+27.33
+
+Gap(%)
+0.32
+
+0.27
+
+1.09
+
+1.57
+
+2.83
+
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3724
+
+Q-LEARNING-ASSISTED SIMULATED ANNEALING FOR TSP
+
+max
+
+1688
+
+2020
+
+min
+mean
+std
+max
+
+2020
+2041.4
+21.81
+2076
+
+699
+
+min
+mean
+std
+max
+
+713
+730.2
+9.95
+745
+
+1273
+
+min
+mean
+std
+max
+
+1287
+1315.4
+23.90
+1366
+
+gr48
+
+5046
+
+min
+mean
+std
+max
+
+5049
+5163.5
+88.30
+5345
+
+hk48
+
+11461
+
+min
+mean
+std
+max
+
+11640
+11847.3
+142.96
+12038
+
+426
+
+min
+mean
+std
+max
+
+430
+439.6
+9.90
+464
+
+7542
+
+min
+mean
+std
+max
+
+7591
+7815.9
+140.42
+7999
+
+675
+
+min
+mean
+std
+max
+
+692
+708.4
+11.31
+726
+
+pr76
+
+108159
+
+min
+mean
+std
+max
+
+109990
+113728.5
+2401.58
+117652
+
+eil76
+
+538
+
+min
+mean
+std
+max
+
+549
+558.9
+7.84
+572
+
+1211
+
+min
+mean
+std
+max
+
+1241
+1286.7
+23.90
+1315
+
+629
+
+min
+mean
+std
+max
+
+650
+664.4
+11.98
+682
+
+bays29
+
+dantzig42
+
+swiss42
+
+eil51
+
+berlin52
+
+st70
+
+rat99
+
+eil101
+
+Average Gap (%)
+
+1690
+1.06
+
+4.46
+
+3.33
+
+2.33
+
+3.37
+
+3.19
+
+3.63
+
+4.95
+
+5.15
+
+3.89
+
+6.25
+
+5.63
+
+2.99
+
+2020
+2059.9
+38.08
+2122
+699
+726.9
+18.88
+750
+1288
+1328.5
+27.99
+1373
+5058
+5221.1
+117.00
+5468
+11474
+11867.3
+325.51
+12654
+427
+438.2
+9.70
+455
+7695
+7894.0
+160.87
+8207
+698
+726.5
+18.88
+759
+108809
+113615.6
+3525.41
+119996
+558
+571.8
+10.58
+591
+1273
+1322.0
+56.39
+1463
+652
+670.1
+15.37
+700
+
+1.97
+
+4.00
+
+4.36
+
+3.47
+
+3.54
+
+2.86
+
+4.66
+
+7.63
+
+5.04
+
+6.28
+
+9.17
+
+6.53
+
+3.86
+
+The experimental results clearly indicate that the choice of exploration policy has a significant impact on the
+performance of Q-learning-assisted Simulated Annealing. Across the 17 TSP benchmark instances, the Softmax-based
+variants consistently outperform their ε-greedy counterparts in both the stateless and state-based formulations.
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3725
+
+N. ADIL, F. EDDAOUDI, H. LAKHBAB AND M. NAIMI
+
+For the stateless algorithms, QLSAS achieves a lower average gap to the best-known solutions (3.09%) compared to
+QLSAϵ (3.73%), and obtains the best mean performance on 15 out of 17 instances. A similar trend is observed for the statebased variants, where SB-QLSAS achieves an average gap of 2.99%, compared to 3.86% for SB-QLSAϵ , with 13 wins out of
+17 instances. These improvements are consistent across small, medium, and larger instances, suggesting that the advantage
+of Softmax is robust with respect to problem size.
+The statistical analysis further confirms these observations. From table 5, we can see that both Wilcoxon and Sign
+tests yield statistically significant differences in both comparisons (p ≺ 0.05), indicating that the observed performance
+differences are unlikely to be due to random variation, with QLSAS winning 15 out of 17 instances and SB-QLSAS winning
+14 in comparison with their greedy-epsilon counterpart.
+From an algorithmic perspective, these results can be explained by the different exploration mechanisms of the two
+policies. The ε-greedy policy selects the best action with high probability while exploring uniformly at random with
+probability ε. Although simple and effective, this strategy does not exploit information about the relative quality of nonbest actions, which may lead to less efficient exploration and higher variance in performance. In contrast, the Softmax policy
+performs a probability-weighted selection based on Q-values, allowing actions with moderately good Q-values to be sampled
+more frequently than clearly inferior ones. This graded exploration mechanism appears particularly beneficial in the context
+of QLSA, where candidate solutions often exhibit small but meaningful differences in quality. As a result, Softmax provides
+a better balance between exploration and exploitation, leading to improved mean performance and lower standard deviations
+in many instances.
+Another noteworthy observation is that the performance gap between policies remains similar in both the stateless
+and state-based frameworks. This indicates that the benefit of Softmax is largely independent of the introduction of state
+information and primarily arises from the action selection mechanism itself.
+Overall, the results demonstrate that Softmax constitutes a more effective exploration strategy for QLSA than ε-greedy in
+the tested settings. Its ability to exploit the structure of the learned Q-values leads to more stable convergence and improved
+solution quality, while maintaining sufficient exploration to avoid premature stagnation.
+
+5.6. Convergence of QLSA algorithms
+Figures 4 and 5 represent the convergence aspect of the five algorithms for some selected instances. The mean of the gap
+computed at each iteration over the 10 runs was calculated to efficiently assess the convergence of SA, QLSAϵ , QLSAs ,
+SB-QLSAϵ and SB-QLSAs . In addition, the iteration at which a quality target of less than 5% gap is reached is indicated
+in the plots whenever the target is achieved. The horizontal dashed line represents the target value, while the vertical lines
+indicate the mean number of iterations required to reach this target.
+
+GAP% convergence + ITTQ@5.0% — bayg29 (BK=1610)
+
+GAP% convergence + ITTQ@5.0% — berlin52 (BK=7542)
+
+90
+
+Algorithm
+
+Algorithm
+
+180
+
+SA
+
+SA
+
+QLSA_s
+
+80
+
+QLSA_s
+160
+
+QLSA_ε
+
+QLSA_ε
+
+SB-QLSA_s
+
+50
+
+40
+
+30
+
+SB-QLSA_ε
+
+140
+
+Best so far GAP (%) to BK
+
+60
+
+120
+
+100
+
+80
+
+60
+
+0
+100
+
+200
+
+300
+
+400
+
+500
+
+600
+
+700
+
+SB-QLSA_s:919
+QLSA_s:920
+
+SB-QLSA_s:660
+
+10
+
+20
+
+0
+800
+
+900
+
+1000
+
+100
+
+200
+
+300
+
+Iteration
+
+400
+
+500
+
+600
+
+700
+
+800
+
+900
+
+SB-QLSA_ε:937
+QLSA_ε:940
+
+40
+
+20
+QLSA_ε:682
+QLSA_s:692
+SB-QLSA_ε:707
+
+Best so far GAP (%) to BK
+
+SB-QLSA_s
+
+SB-QLSA_ε
+
+70
+
+1000
+
+Iteration
+
+(a) bayg29
+
+(b) berlin52
+
+Figure 4. Convergence of the GAP - First Group
+
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3726
+
+Q-LEARNING-ASSISTED SIMULATED ANNEALING FOR TSP
+
+GAP% convergence + ITTQ@5.0% — hk48 (BK=11461)
+
+GAP% convergence + ITTQ@5.0% — eil76 (BK=538)
+
+Algorithm
+
+Algorithm
+
+SA
+
+SA
+
+QLSA_s
+
+QLSA_s
+
+250
+
+QLSA_ε
+
+QLSA_ε
+
+SB-QLSA_s
+
+SB-QLSA_s
+
+SB-QLSA_ε
+
+150
+
+SB-QLSA_ε
+
+Best so far GAP (%) to BK
+
+Best so far GAP (%) to BK
+
+200
+
+100
+
+150
+
+100
+
+50
+
+0
+100
+
+200
+
+300
+
+400
+
+500
+
+600
+
+700
+
+800
+
+900
+
+SB-QLSA_s:952
+QLSA_s:962
+
+QLSA_s:894
+SB-QLSA_ε:904
+SB-QLSA_s:905
+QLSA_ε:920
+
+50
+
+0
+1000
+
+100
+
+200
+
+300
+
+400
+
+500
+
+Iteration
+
+600
+
+700
+
+800
+
+900
+
+1000
+
+Iteration
+
+(a) hk48
+
+(b) eil76
+GAP% convergence + ITTQ@5.0% — eil101 (BK=629)
+
+Algorithm
+SA
+QLSA_s
+
+350
+
+QLSA_ε
+SB-QLSA_s
+SB-QLSA_ε
+
+Best so far GAP (%) to BK
+
+300
+
+250
+
+200
+
+150
+
+100
+
+SB-QLSA_s:978
+
+50
+
+0
+100
+
+200
+
+300
+
+400
+
+500
+
+600
+
+700
+
+800
+
+900
+
+1000
+
+Iteration
+
+(c) eil101
+
+Figure 5. Convergence of the GAP - Second Group
+Generally, all algorithms exhibit a rapid reduction of the optimality gap during the early iterations, followed by a slower
+improvement phase, which is typical of metaheuristic search processes.
+On the bayg29 instance, the learning-assisted variants reach the 5% gap target earlier than classical SA, with SB-QLSAs
+achieving the target in approximately 660 iterations, followed by QLSAϵ and QLSAs , indicating that the learning mechanism
+can accelerate convergence in small instances.
+For berlin52, the differences between algorithms become less pronounced, as all QLSA variants reach the target at similar
+iteration counts (around 920–940 iterations), suggesting that the benefit of learning remains present but less significant when
+the landscape becomes more complex. Similar behavior can be seen on hk48, the curves show similar convergence trends
+among the QLSA variants, with only moderate differences in the iteration required to reach the target, confirming that the
+advantage of reinforcement-guided selection is instance-dependent and may diminish as problem structure or neighborhood
+difficulty increases. As for larger instances, the eil76 and eil101 graphs shows that convergence is slower and the target is
+reached only by SB-QLSAs , indicating that this variant tends to provide more stable improvements in larger search spaces.
+Overall, this convergence analysis shows that the proposed learning-assisted variants maintain stable search dynamics
+and are able to progressively reduce the optimality gap on individual instances. However, convergence behavior alone does
+not fully characterize the practical performance of the methods. In many real-world applications, problem size increases
+substantially, and it becomes essential to assess how both solution quality and learning dynamics evolve as the instance
+dimension grows. In the next paragraph, we analyze whether the reinforcement learning component maintains its ability to
+discriminate between candidate operators when the search space becomes larger.
+Figure 6 reports two aggregate diagnostics computed across instances of increasing size. In order to provide a clear and
+representative view, we restrict this analysis to the softmax-based variants, which consistently provided the best overall
+performance in terms of solution quality and stability in the previous experiments.
+
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+N. ADIL, F. EDDAOUDI, H. LAKHBAB AND M. NAIMI
+
+3727
+
+Scaling diagnostic — policy entropy vs instance size
+
+Algorithm
+QLSA_s
+1.3856
+
+SB-QLSA_s
+
+mean entropy (mean over runs)
+
+1.3855
+
+1.3854
+
+1.3853
+
+1.3852
+
+1.3851
+
+1.385
+
+1.3849
+
+1.3848
+
+20
+
+30
+
+40
+
+50
+
+60
+
+70
+
+80
+
+90
+
+100
+
+Instance size (n)
+
+(a) Scaling entropy vs n
+
+(b) Scaling reward-zero rate vs n
+
+Figure 6. Scalability Analysis graphs
+Figure 6a reports the mean policy entropy across runs. The policy entropy is defined as:
+X
+H=−
+p(ai ) log p(ai ),
+
+(14)
+
+i
+
+where p(ai ) denotes the probability of selecting action ai . This quantity measures the dispersion of the action-selection
+distribution: low entropy indicates strong preference for a subset of candidates, while high entropy corresponds to a more
+evenly distributed selection policy. The graph indicates that the mean policy entropy remains close to its theoretical maximum
+for a candidate set of size four. Indeed, the maximum entropy is given by:
+Hmax = log(4) ≈ 1.386,
+
+(15)
+
+and the observed values range approximately between 1.3854 for smaller instances and about 1.3850–1.3852 for larger
+ones. These results show that the action-selection distribution becomes only weakly differentiated as the instance size
+increases. In other words, although learning remains stable, the policy exhibits limited differanciation in larger search spaces,
+reflecting a reduced separation between Q-values.
+Figure 6b provides further insight into this behavior by examining the reward signal available to the learning process. The
+reward-zero rate, is defined as the proportion of iterations in which the selected move does not produce an improvement of
+the incumbent solution. This indicator reflects the frequency of informative learning signals available to the reinforcement
+learning component.
+For small instances such as n = 16 or n = 29, the reward-zero rate remains at moderate levels, indicating that improving
+moves occur frequently enough to provide informative feedback to the learning mechanism. As the instance size increases,
+this rate decreases and stabilizes at values close to zero for instances around n = 101. This trend reflects the increasing
+difficulty of obtaining improving moves in larger TSP instances, where most candidate moves produce marginal or no
+improvements. Taken together, these results suggest that the reduced policy selectivity observed in larger instances is
+primarily due to the decreasing magnitude and frequency of informative rewards rather than instability of the learning
+mechanism itself. As the search space grows, improvements become rarer and smaller in relative terms, which slows down
+Q-value separation and limits the degree to which the policy can favor specific operators.
+Nevertheless, it is important to note that this effect does not prevent the algorithms from maintaining stable convergence
+behavior, as shown previously. Rather, it highlights an intrinsic scalability challenge of reinforcement-learning-assisted
+metaheuristics: preserving strong operator discrimination in increasingly large and complex search spaces remains an open
+research direction, and may require adaptive reward scaling, longer learning horizons, or temperature scheduling strategies.
+
+5.7. Computational time Analysis
+Table 8 reports the execution time of SA, QLSA, and SB-QLSA.
+
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3728
+
+Q-LEARNING-ASSISTED SIMULATED ANNEALING FOR TSP
+
+Table 8. Computational time comparison (seconds) between SA, QLSA and SB-QLSA variants. The fastest time for each
+instance is shown in bold.
+Instance
+
+SA
+
+QLSAs
+
+QLSAϵ
+
+SB-QLSAs
+
+SB-QLSAϵ
+
+ulysses16
+gr17
+ulysses22
+gr24
+bayg29
+bays29
+dantzig42
+swiss42
+gr48
+hk48
+eil51
+berlin52
+st70
+pr76
+eil76
+rat99
+eil101
+
+8.35
+13.70
+30.80
+57.49
+61.63
+51.22
+234.42
+191.94
+410.85
+365.95
+589.41
+600.56
+2460.60
+3009.84
+2379.99
+5027.88
+151064.69
+
+11.79
+23.22
+41.23
+68.89
+72.65
+57.85
+240.51
+203.46
+455.65
+386.79
+610.57
+638.66
+2540.81
+3112.49
+2466.04
+5002.22
+151560.10
+
+9.80
+18.77
+39.10
+59.80
+65.63
+53.16
+244.44
+200.25
+439.89
+373.49
+602.53
+644.12
+2498.47
+3065.35
+2450.12
+5003.58
+152305.01
+
+12.00
+23.17
+41.11
+66.10
+70.88
+57.42
+244.25
+201.41
+447.25
+376.99
+611.71
+645.16
+2499.99
+3066.64
+2474.23
+4981.07
+150715.01
+
+10.33
+20.17
+37.55
+60.59
+66.08
+53.15
+239.97
+200.55
+440.92
+371.55
+591.92
+620.02
+2487.54
+2381.83
+2485.83
+4915.73
+151607.59
+
+As we can see, in terms of computational times, all algorithms remain broadly comparable across the tested instances.
+Classical SA is generally the fastest method, while QLSA and SB-QLSA introduce a moderate additional cost, which is
+more noticeable on small instances but decreases as the problem size increases. In several medium and large instances, the
+differences in execution time become marginal, indicating that the learning mechanism does not significantly affect practical
+scalability. Moreover, the state-based variants exhibit computational times similar to those of their stateless counterparts,
+showing that the proposed state representation does not introduce a substantial additional burden.
+From a theoretical standpoint, the per-iteration complexity of QLSA remains of the same order as that of classical SA.
+Let f (n) denote the cost of evaluating a candidate solution of size n. Both algorithms require generating a neighbor solution
+and computing its objective value, which dominates the runtime and contributes O(f (n)) per iteration. The reinforcement
+learning component adds the selection of an action and the update of a Q-value, operations that require only a small and
+bounded number of arithmetic computations. Although the maintenance of multiple candidate operators may introduce a
+small constant overhead in practice, this cost remains independent of the problem size.
+Consequently, the overall per-iteration complexity remains O(f (n)), meaning that the dominant computational bottleneck
+in all variants is still the evaluation of candidate solutions. For TSP instances, the most expensive operations remain tour
+modification and distance evaluation, whose cost depends on the chosen neighborhood operator and typically ranges between
+O(1) and O(n). In contrast, the reinforcement learning update and policy evaluation remain independent of the instance size
+and therefore represent a diminishing fraction of the runtime as n increases.
+To better quantify the impact of the learning mechanism on runtime, Table 9 reports the relative computational overhead
+of each variant with respect to classical SA. The results show that the overhead is more pronounced for small instances,
+where constant-time operations such as policy selection and Q-value updates represent a larger fraction of the total runtime.
+However, as the instance size increases, the relative overhead decreases rapidly and becomes negligible for large-scale
+problems. This trend confirms that the dominant computational cost in all algorithms remains the evaluation of candidate
+solutions and neighborhood operations, whose complexity grows with the problem size. In contrast, the reinforcement
+learning components introduce only a bounded additional cost that does not scale with the instance dimension. Interestingly,
+in a few cases the learning-based variants even exhibit slightly lower execution times than SA. This behavior can be attributed
+to stochastic search trajectories that may reach high-quality regions of the search space earlier, thereby reducing the number
+of costly evaluations in practice.
+Overall, these results indicate that the proposed learning mechanisms affect constant factors but do not alter the practical
+scalability of the algorithm, making them suitable for medium and large TSP instances where solution quality improvements
+are obtained at a marginal computational cost.
+
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3729
+
+N. ADIL, F. EDDAOUDI, H. LAKHBAB AND M. NAIMI
+
+Table 9. Relative computational overhead (%) of Q-learning-based SA variants compared to SA.
+Instance
+ulysses16
+gr17
+ulysses22
+gr24
+bayg29
+bays29
+dantzig42
+swiss42
+gr48
+hk48
+eil51
+berlin52
+st70
+pr76
+eil76
+rat99
+eil101
+
+QLSAs
+41.20
+69.49
+33.86
+19.83
+17.88
+12.95
+2.60
+6.00
+10.90
+5.69
+3.59
+6.34
+3.26
+3.41
+3.62
+-0.51
+0.33
+
+QLSAϵ
+17.37
+37.01
+26.95
+4.02
+6.49
+3.79
+4.28
+4.32
+7.07
+2.05
+2.22
+7.25
+1.54
+1.84
+2.95
+-0.48
+0.82
+
+SB-QLSAs
+43.71
+69.12
+33.47
+14.98
+15.01
+12.11
+4.20
+4.93
+8.86
+3.02
+3.78
+7.41
+1.60
+1.88
+3.95
+-0.93
+-0.23
+
+SB-QLSAϵ
+23.71
+47.23
+21.92
+5.39
+7.22
+3.75
+2.37
+4.49
+7.31
+1.53
+0.43
+3.24
+1.10
+-20.86
+4.44
+-2.22
+0.36
+
+These observations suggest that the trade-off between solution quality and computational effort remains favorable, as the
+additional runtime required by the learning mechanisms becomes negligible compared to the cost of evaluating candidate
+solutions for large instances.
+
+6. Conclusion and Future Work
+This paper investigated multiple variants of reinforcement-learning-assisted variants of simulated annealing for solving
+the Traveling Salesman Problem. Several Q-learning-based strategies were proposed and analyzed, including stateless and
+state-based formulations, as well as different action-selection policies. Among these variants, the proposed State-Based QLearning-Assisted Simulated Annealing (SB-QLSA), particularly when combined with a softmax selection policy, achieved
+the most consistent and robust performance across the tested benchmark instances. Extensive experiments on a wide range
+of TSPLIB instances show that Q-learning-assisted variants significantly improve solution quality and robustness compared
+with classical simulated annealing. Statistical analyses, including Friedman, Wilcoxon, and Sign tests, confirm that these
+improvements are statistically significant which indicate that incorporating learning mechanisms to guide the selection of
+neighborhood leaders enhances both the stability and effectiveness of the search process, while the introduction of state
+information further improves the algorithm’s ability to adapt its behavior to different search regimes.
+The experimental analysis also provided insight into the scalability of the proposed methods. While all learning-assisted
+variants exhibit stable convergence behavior and strong performance on small and medium-sized instances, a gradual
+decrease in performance is observed as the instance size increases. Diagnostic analyses indicate that informative rewards
+become less frequent and smaller in magnitude in larger search spaces, which slows down the separation of action values
+and reduces policy selectivity. This behavior reflects intrinsic challenges of applying reinforcement learning within large
+combinatorial landscapes rather than instability of the learning process itself.
+Several factors contribute to this limitation. The stateless formulation restricts the ability of the learning mechanism to adapt
+its guidance strategy to different phases of the annealing process, while the use of a fixed and compact candidate set may
+provide insufficient diversity for effective navigation of large and complex landscapes. In addition, learning parameters that
+are effective for small and medium-sized instances may require careful scaling or adaptation to fully exploit reinforcement
+learning on larger problems.
+Beyond the TSP, the proposed framework remains inherently problem-independent. By coupling a metaheuristic
+backbone with a reinforcement learning mechanism to guide neighborhood exploration, the approach can be extended to
+other combinatorial optimization problems with minimal modification, requiring only the definition of problem-specific
+neighborhood operators. Potential applications include vehicle routing, scheduling, assignment, Multidimensional Knapsack
+Problem and other large-scale discrete optimization problems.
+Future work will focus on improving scalability and adaptability. In particular, adaptive and self-tuning parameter
+control strategies will be investigated to achieve a more effective balance between exploration and exploitation in largescale instances. Extending the learning mechanism toward richer state representations and context-sensitive reinforcement
+learning models represents a promising direction for enhancing phase-dependent decision-making. Additional improvements
+may also be obtained through dynamic candidate-set generation, hybridization with complementary metaheuristics, and
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+3730
+
+Q-LEARNING-ASSISTED SIMULATED ANNEALING FOR TSP
+
+parallel implementations. Finally, evaluating the proposed variants on much larger TSP instances and other combinatorial
+optimization problems constitutes a natural continuation of this work.
+
+REFERENCES
+1. G. Reinelt, TSPLIB—A traveling salesman problem library , ORSA Journal on Computing, vol. 3, no. 4, pp. 376-384, 1991.
+2. S. Kirkpatrick, C. D. Gelatt, and M. P. Vecchi, Optimization by Simulated Annealing, Science, vol. 220, no. 4598, pp. 671–680,
+1983.
+3. E. G. Talbi, Metaheuristics: from design to implementation, John Wiley & Sons, 2009.
+4. I. H. Osman and G. Laporte, Metaheuristics: A bibliography, Annals of Operations Research, vol. 63, no. 5, pp. 513–623, 1996.
+5. V. Granville, M. Krivanek, and J.-P. Rasson, Simulated Annealing: A Proof of Convergence, IEEE Transactions on Pattern Analysis
+and Machine Intelligence, vol. 16, no. 6, pp. 652–656, 1994.
+6. M. Tessari and G. Iacca, Reinforcement Learning Based Adaptive Metaheuristics, in GECCO ’22 Companion Proceedings, p.
+1854-1861, 2022.
+7. R.K. Kincaid and A. Ninh, Simulated Annealing , in: Martı́, R., Martı́nez-Gavara, A. (Eds.), Discrete Diversity and Dispersion
+Maximization: A Tutorial on Metaheuristic Optimization. Springer International Publishing, Cham, pp. 221–249, 2023.
+8. C. J. C. H. Watkins and P. Dayan, Q-learning, Machine Learning, vol. 8, no. 3, pp. 279–292, 1992.
+9. İ. İlhan, An Improved Simulated Annealing Algorithm with Crossover Operator for Capacitated Vehicle Routing Problem, Swarm
+and Evolutionary Computation, vol. 64, art. 100911, 2021.
+10. R. Reijnen, Y. Zhang, H. C. Lau, and Z. Bukhsh, Online Control of Adaptive Large Neighborhood Search Using Deep Reinforcement
+Learning, in In : Proceedings of the International Conference on Automated Planning and Scheduling, p. 475-483, 2024.
+11. Y. Zhong, L. Wang, M. Lin and H. Zhang, Discrete pigeon-inspired optimization algorithm with Metropolis acceptance criterion
+for large-scale traveling salesman problem, Swarm and Evolutionary Computation, vol. 4, pp. 134–144, 2019.
+12. A. E. Ezugwu, A. O. Adewumi, and M. E. Frı̂ncu, Simulated annealing based symbiotic organisms search optimization algorithm
+for traveling salesman problem , Expert Systems with Applications, vol. 77, pp. 189–210, 2017.
+13. Zhou, A.-H., Zhu, L.-P., Hu, B., Deng, S., Song, Y., Qiu, H., and Pan, S, Traveling-Salesman-Problem Algorithm Based on Simulated
+Annealing and Gene-Expression Programming, Information, vol. 10, n. 1, 7.
+14. Zhan, S. H., Lin, J., Zhang, Z. J., and Zhong, Y. W., List-Based Simulated Annealing Algorithm for Traveling Salesman Problem,
+Computational Intelligence and Neuroscience, vol. 2016, n. 1, pp. 1712630, 2016.
+15. A. Adil and H. Lakhbab, A new improved simulated annealing for traveling salesman problem, Mathematical modeling and
+computing, , vol. 10, no 3, p. 764-771, 2023.
+16. Y. Wu, H. Wang, M. Li, H. Tan, D. Wang, and M. Sheng, The adaptive two-stage ant colony simulated annealing algorithm for
+solving the Traveling Salesman Problem, RAIRO-Operations Research, vol. 59, no. 2, pp. 1199–1213, 2025.
+17. Y. Su, Y. Ran, Z. Yan, Y. Zhang, and X. Yang, Solving the Traveling Salesman Problem Using the IDINFO Algorithm, ISPRS
+International Journal of Geo-Information, vol. 14, n. 3, p. 111, 2025.
+18. A. Q. Tian, H. X. Lv, X. Y. Wang,J. S. Pan and V. Snášel, Bioinspired Discrete Two-Stage Surrogate-Assisted Algorithm for LargeScale Traveling Salesman Problem, Journal of Bionic Engineering, p. 1-14, 2025.
+19. W. Kool, H. van Hoof, and M. Welling, Attention, Learn to Solve Routing Problems!, arXiv preprint arXiv:1803.08475, 2018.
+20. L. Zhou, Y. Ju, and S. Moura, Learning-Guided Local Search for Asymmetric Traveling Salesman Problem, 2nd AI for Math
+Workshop @ ICML 2025.
+21. S. H. Rahaman, S. Mondal, and M. K. Maiti, A collaborative use of two metaheuristic methods using Q-learning for the travelling
+salesman problems in different fields: an application to smart home delivery system, Evolutionary Intelligence, vol. 18, n. 3, p. 53,
+2025.
+22. L. Sun, M. Zhu, J. Li and H. Zhang, Adaptive annealing dynamic Q-learning based on subroute optimization for solving the traveling
+salesman problem, Cluster Computing, vol. 28, n. 7, p. 454, 2025.
+23. R. S. Sutton and A. G. Barto, Reinforcement Learning: An Introduction, MIT Press, 2018.
+24. A. Fialho, L. Da Costa, M. Schoenauer, and M. Sebag, Analyzing Bandit-Based Adaptive Operator Selection, Annals of Mathematics
+and Artificial Intelligence, vol. 60, no. 1, pp. 25–64, 2010.
+25. Dantzig, G. B., Fulkerson, D. R., and Johnson, S. M. , On a Linear-Programming, Combinatorial Approach to the TravelingSalesman Problem , Operations Research, vol. 7, no 1, p. 58-66, 1959.
+26. Glover, F., Tabu search—part I , ORSA Journal on computing, vol. 1, no. 3, pp. 190–206, 1989.
+27. Kennedy, J., and Eberhart, R Particle swarm optimization , In Proceedings of ICNN’95-international conference on neural networks,
+vol. 4, no. 3, pp. 1942-1948, 1995.
+28. BRUCKER, Peter, NP-Complete operations research problems and approximation algorithms , Zeitschrift für Operations-Research,
+vol. 23, no 3, p. 73-94, 1979
+29. B. Jang, M. Kim, G. Harerimana and J. W. Kim, Q-Learning Algorithms: A Comprehensive Classification and Applications, in
+IEEE Access, vol. 7, pp. 133653-133667, 2019
+30. Tokic, M., Palm, G., Value-Difference Based Exploration: Adaptive Control between Epsilon-Greedy and Softmax, In: Bach, J.,
+Edelkamp, S. (eds) KI 2011: Advances in Artificial Intelligence. KI 2011. Lecture Notes in Computer Science(), vol 7006. Springer,
+Berlin, Heidelberg, 2011.
+31. Martin, O., Otto, S. W., and Felten, E. W., Large-step Markov chains for the traveling salesman problem, Oregon Graduate Institute
+of Science and Technology, Department of Computer Science and Engineering. pp. 299-326, 1991.
+
+Stat., Optim. Inf. Comput. Vol. 15, May 2026
+
+

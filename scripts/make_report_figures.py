@@ -140,7 +140,7 @@ def add_bar_labels(ax, bars, fmt="{:.2f}") -> None:
 
 
 def save(fig, path: Path) -> None:
-    fig.savefig(path, dpi=180, bbox_inches="tight")
+    fig.savefig(path, dpi=220, bbox_inches="tight")
     print(f"[figure] {path.relative_to(ROOT)}")
 
 
@@ -423,6 +423,123 @@ def write_report_comparison_summary(rows: Dict[Tuple[str, str], Dict[str, str]])
     print(f"[csv] {out_path.relative_to(ROOT)}")
 
 
+def mean(values: List[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def fig_openmp_scaling_threads(plt) -> None:
+    path = RESULTS / "openmp_scaling_final_summary.csv"
+    if not path.exists():
+        return
+    rows = read_csv(path)
+    fig, axes = plt.subplots(1, 2, figsize=(12.2, 4.8), sharey=True)
+    for ax, inst in zip(axes, ["berlin52", "eil101"]):
+        for alg, color in [("sa-omp", "#2563eb"), ("qlsa-omp", "#f97316")]:
+            pts = [
+                r for r in rows
+                if r["instance"] == inst and r["algorithm"] == alg and int(r["chains"]) == 32
+            ]
+            pts = sorted(pts, key=lambda r: int(r["threads"]))
+            xs = [int(r["threads"]) for r in pts]
+            ys = [f(r, "speedup") for r in pts]
+            ax.plot(xs, ys, marker="o", linewidth=2.0, label=alg.replace("-omp", "").upper(), color=color)
+        xs = sorted({int(r["threads"]) for r in rows if r["instance"] == inst and int(r["chains"]) == 32})
+        ax.plot(xs, xs, linestyle="--", color="#9ca3af", label="ideal")
+        ax.set_title(f"{inst}, chains=32")
+        ax.set_xlabel("Threads")
+        ax.grid(True, linestyle="--", alpha=0.3)
+    axes[0].set_ylabel("Speedup")
+    axes[1].legend(loc="upper left")
+    fig.suptitle("OpenMP 线程扩展性：speedup")
+    save(fig, FIGURES / "fig_openmp_scaling_threads.png")
+    plt.close(fig)
+
+
+def fig_openmp_scaling_efficiency_threads(plt) -> None:
+    path = RESULTS / "openmp_scaling_final_summary.csv"
+    if not path.exists():
+        return
+    rows = read_csv(path)
+    fig, axes = plt.subplots(1, 2, figsize=(12.2, 4.8), sharey=True)
+    for ax, inst in zip(axes, ["berlin52", "eil101"]):
+        for alg, color in [("sa-omp", "#2563eb"), ("qlsa-omp", "#f97316")]:
+            pts = [
+                r for r in rows
+                if r["instance"] == inst and r["algorithm"] == alg and int(r["chains"]) == 32
+            ]
+            pts = sorted(pts, key=lambda r: int(r["threads"]))
+            xs = [int(r["threads"]) for r in pts]
+            ys = [f(r, "parallel_efficiency_percent") for r in pts]
+            ax.plot(xs, ys, marker="o", linewidth=2.0, label=alg.replace("-omp", "").upper(), color=color)
+        ax.axhline(100, linestyle="--", color="#9ca3af", linewidth=1.0)
+        ax.set_title(f"{inst}, chains=32")
+        ax.set_xlabel("Threads")
+        ax.grid(True, linestyle="--", alpha=0.3)
+    axes[0].set_ylabel("Parallel efficiency (%)")
+    axes[1].legend(loc="upper right")
+    fig.suptitle("OpenMP 线程扩展性：parallel efficiency")
+    save(fig, FIGURES / "fig_openmp_scaling_efficiency_threads.png")
+    plt.close(fig)
+
+
+def fig_cuda_chains_blocks(plt) -> None:
+    path = RESULTS / "cuda_scaling.csv"
+    if not path.exists():
+        return
+    rows = read_csv(path)
+    usable = [r for r in rows if r.get("parallel") == "cuda" and r.get("instance") == "square4"]
+    if not usable:
+        return
+    grouped: Dict[Tuple[str, int, int], List[float]] = {}
+    for row in usable:
+        key = (row["algorithm"], int(row["chains"]), int(row["threads"]))
+        grouped.setdefault(key, []).append(f(row, "elapsed_ms"))
+    blocks = sorted({key[2] for key in grouped})
+    chains = sorted({key[1] for key in grouped})
+    fig, axes = plt.subplots(1, 2, figsize=(12.2, 4.8), sharey=True)
+    for ax, alg, color in zip(axes, ["sa-cuda", "qlsa-cuda"], ["#7c3aed", "#dc2626"]):
+        for block in blocks:
+            ys = [mean(grouped.get((alg, chain, block), [])) for chain in chains]
+            ax.plot(chains, ys, marker="o", linewidth=2.0, label=f"block={block}", color=None)
+        ax.set_title(alg.upper())
+        ax.set_xlabel("Chains")
+        ax.grid(True, linestyle="--", alpha=0.3)
+    axes[0].set_ylabel("Mean elapsed time (ms)")
+    axes[1].legend(loc="upper left")
+    fig.suptitle("CUDA-facing chains/block smoke scaling (square4)")
+    save(fig, FIGURES / "fig_cuda_chains_blocks.png")
+    plt.close(fig)
+
+
+def write_missing_figures_note() -> None:
+    required = [
+        "fig_architecture_pipeline.png",
+        "fig_openmp_speedup.png",
+        "fig_openmp_efficiency.png",
+        "fig_default_gap.png",
+        "fig_tuned_quality_improvement.png",
+        "fig_paper_runtime_comparison_log.png",
+        "fig_paper_quality_hard_instances.png",
+        "fig_cuda_positioning.png",
+        "fig_openmp_scaling_threads.png",
+        "fig_openmp_scaling_efficiency_threads.png",
+        "fig_convergence_berlin52.png",
+        "fig_convergence_rat99.png",
+        "fig_policy_comparison.png",
+        "fig_cuda_chains_blocks.png",
+    ]
+    missing = [name for name in required if not (FIGURES / name).exists()]
+    note = FIGURES / "MISSING_FIGURES.md"
+    if missing:
+        note.write_text(
+            "# Missing Figures\n\n" + "\n".join(f"- `{name}`: missing source data or generation step not run." for name in missing) + "\n",
+            encoding="utf-8",
+        )
+        print(f"[warning] wrote {note.relative_to(ROOT)}")
+    elif note.exists():
+        note.unlink()
+
+
 def main() -> int:
     FIGURES.mkdir(parents=True, exist_ok=True)
     rows = default_rows()
@@ -452,6 +569,10 @@ def main() -> int:
     fig_paper_runtime(plt, rows)
     fig_paper_quality(plt)
     fig_cuda_positioning(plt)
+    fig_openmp_scaling_threads(plt)
+    fig_openmp_scaling_efficiency_threads(plt)
+    fig_cuda_chains_blocks(plt)
+    write_missing_figures_note()
     return 0
 
 

@@ -10,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REPORTS = [
+    ROOT / "docs" / "final_report_extreme.md",
     ROOT / "docs" / "final_report_v3.md",
     ROOT / "docs" / "final_report_v2.md",
 ]
@@ -70,7 +71,7 @@ def main() -> int:
             failed = True
 
     required_any = [
-        ["课程要求与完成情况", "课程要求与项目完成度对应关系"],
+        ["课程要求与完成情况", "课程要求与完成度", "课程要求与项目完成度对应关系"],
         ["与参考论文的对比", "与论文结果对比"],
         ["OpenMP", "CUDA", "QLSA"],
     ]

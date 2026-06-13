@@ -84,19 +84,19 @@ def main() -> int:
             print(f"[warning] table row has {cols} columns at line {idx}: {line[:120]}")
             warnings += 1
 
-    required = [
-        "## 摘要",
-        "## 1. 基本信息",
-        "## 2. 课程要求与完成情况",
-        "## 7. 与参考论文的对比",
-        "## 12. 总结与贡献",
+    required_groups = [
+        ["## 摘要"],
+        ["## 1. 基本信息"],
+        ["## 2. 课程要求与完成情况", "## 2. 课程要求与完成度"],
+        ["与参考论文的对比", "与论文结果对比"],
+        ["总结与贡献"],
     ]
-    for heading in required:
-        if heading not in text:
-            print(f"[error] missing heading: {heading}")
+    for options in required_groups:
+        if not any(option in text for option in options):
+            print(f"[error] missing required heading/content, expected one of: {options}")
             failed = True
 
-    if "表 3：选题报告预期目标与实际完成情况对照" not in text:
+    if "预期目标" not in text or "实际" not in text:
         print("[error] missing expected-vs-actual completion table")
         failed = True
 

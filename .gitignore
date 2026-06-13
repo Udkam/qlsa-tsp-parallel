@@ -1,4 +1,4 @@
-build/
+﻿build/
 build-*/
 results/*.csv
 !results/berlin52_manual_raw.csv
@@ -11,9 +11,10 @@ data/*.tmp
 *.user
 *.suo
 *.vcxproj.user
+docs/
+submission/
 
+PA-final-2026.pdf
 选题报告.md
 选题报告.pdf
-PA-final-2026.pdf
 Q-learning旅行商问题.pdf
-

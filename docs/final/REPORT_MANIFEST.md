@@ -6,7 +6,9 @@
 
 | 文件 | 状态 | 用途 |
 |---|---|---|
-| `docs/final/final_report_master.md` | 主入口 | 最终报告叙事母版。所有课程版、公开版和提交包报告均应以此为内容来源。 |
+| `docs/final/final_report_master.md` | 主入口 | 最终报告叙事母版（12 节结构）。课程版、公开版和提交包报告均以此为内容来源。 |
+
+master、course、public 三份报告共享同一 12 节结构，仅在第 1 节基本信息和附录 A 的个人信息处不同；`scripts/check_report_format.py` 对三者使用同一套 `REQUIRED_HEADINGS` 校验。
 
 ## 最终派生输出
 
@@ -28,6 +30,7 @@
 - `docs/archive/final_report_v5_package/`
 - `docs/archive/final_report_extreme.md`
 - `docs/archive/final_submission_v2/`
+- `docs/archive/final_report_master_v2.md`
 
 如果后续需要修改最终报告，应优先修改 `docs/final/final_report_master.md`，再同步生成 course/public 派生版本。
 

@@ -10,7 +10,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REPORTS = [
-    ROOT / "docs" / "final" / "final_report_master_v2.md",
     ROOT / "docs" / "final" / "final_report_master.md",
     ROOT / "docs" / "final" / "final_report_course.md",
     ROOT / "docs" / "final" / "final_report_public.md",
@@ -38,14 +37,15 @@ FORBIDDEN_PHRASES = [
 ]
 
 REQUIRED_CONTENT = [
-    "问题背景与课程目标映射",
-    "论文方法拆解",
-    "系统设计",
-    "并行设计",
+    "预期目标与实际完成情况",
+    "参考论文方法与实现差异",
+    "实施方案设计",
+    "并行算法设计",
+    "实施过程中解决的问题",
     "实验设计",
-    "实验结果",
-    "与论文对比",
-    "工程难度",
+    "实验结果与分析",
+    "与论文结果对比",
+    "工程难度与完成质量",
     "局限性",
 ]
 

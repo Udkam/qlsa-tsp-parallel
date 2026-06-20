@@ -35,34 +35,22 @@ ERROR_PHRASES = [
     "图X：",
 ]
 
+# Single canonical 12-section structure shared by master, course and public reports.
 REQUIRED_HEADINGS = [
     "# 面向旅行推销员问题的 Q-Learning 辅助模拟退火算法并行化实现与性能优化",
     "## 摘要",
     "## 1. 基本信息",
     "## 2. 预期目标与实际完成情况",
-    "## 3. 参考论文方法与本项目定位",
-    "## 4. 方案设计",
-    "## 5. 并行方案设计",
-    "## 6. 实施过程与解决的问题",
+    "## 3. 参考论文方法与实现差异",
+    "## 4. 实施方案设计",
+    "## 5. 并行算法设计",
+    "## 6. 实施过程中解决的问题",
     "## 7. 实验设计",
     "## 8. 实验结果与分析",
-    "## 9. 与近期论文结果对比",
-    "## 10. 工程难度与完成质量说明",
+    "## 9. 与论文结果对比",
+    "## 10. 工程难度与完成质量",
     "## 11. 局限性",
     "## 12. 总结",
-]
-
-MASTER_HEADINGS = [
-    "# 1. 问题背景与课程目标映射",
-    "# 2. 论文方法拆解",
-    "# 3. 系统设计",
-    "# 4. 并行设计",
-    "# 5. 实验设计",
-    "# 6. 实验结果",
-    "# 7. 与论文对比",
-    "# 8. 工程难度",
-    "# 9. 局限性",
-    "# 10. 总结",
 ]
 
 
@@ -103,8 +91,7 @@ def main() -> int:
             print(f"[error] forbidden phrase found: {phrase}")
             failed = True
 
-    required_headings = MASTER_HEADINGS if report.name.startswith("final_report_master") else REQUIRED_HEADINGS
-    for heading in required_headings:
+    for heading in REQUIRED_HEADINGS:
         if heading not in text:
             print(f"[error] missing required heading: {heading}")
             failed = True

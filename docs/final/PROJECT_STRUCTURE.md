@@ -8,10 +8,13 @@
 - `docs/dev/`：过程性设计与实验分析文档，包括各阶段设计文档、调参分析、论文机制对齐和代码质量审查。
 - `docs/archive/`：旧版报告、历史提交包和不再作为主入口使用的文档。
 
-最终主报告只保留两份：
+最终报告以母版加两份派生版组织：
 
+- `docs/final/final_report_master.md`：唯一主报告母版（12 节结构），基本信息脱敏，是 course/public 的内容来源。
 - `docs/final/final_report_course.md`：课程提交版，允许包含姓名、学号等课程要求信息。
 - `docs/final/final_report_public.md`：公开仓库版，不包含姓名、学号、邮箱等私人信息。
+
+`docs/final/OPUS_AUDIT.md` 记录最近一次审计与整理过程。
 
 ## 图表目录
 

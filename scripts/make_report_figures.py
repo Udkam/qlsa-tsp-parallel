@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """Generate final report figures from existing CSV data.
 
 The script never fabricates missing data. If an input CSV is unavailable, the
 corresponding figure is skipped and recorded in figures/final/MISSING_FIGURES.md.
+
+Figure text is rendered in Chinese where possible; English is kept only for
+proper nouns, algorithm/library names and metric abbreviations (SA, QLSA,
+OpenMP, CUDA, TSPLIB95, BKS, Gap, Speedup, Efficiency, CSV, Parser, 2-opt,
+Softmax, epsilon-greedy, Serial, CPU, GPU, Paper, Python, C++20). A CJK font is
+auto-detected; if none is available the script still renders but records the
+problem in figures/final/MISSING_FONTS.md.
 """
 
 from __future__ import annotations
@@ -33,6 +41,49 @@ COLORS = {
 }
 
 MISSING: list[str] = []
+
+# CJK font fallback candidates, ordered by platform preference.
+CJK_FONT_CANDIDATES = [
+    "Microsoft YaHei",       # Windows
+    "SimHei",                # Windows
+    "SimSun",                # Windows
+    "PingFang SC",           # macOS
+    "Heiti SC",              # macOS
+    "Noto Sans CJK SC",      # Linux
+    "WenQuanYi Micro Hei",   # Linux
+]
+
+
+def detect_cjk_fonts() -> List[str]:
+    """Return the available CJK fonts from the candidate list, in order."""
+    try:
+        import matplotlib.font_manager as fm
+
+        available = {f.name for f in fm.fontManager.ttflist}
+    except Exception as exc:  # pragma: no cover
+        MISSING.append(f"font detection failed: {exc}")
+        return []
+    return [name for name in CJK_FONT_CANDIDATES if name in available]
+
+
+def write_font_note(found: List[str]) -> None:
+    """Record a clear note if no CJK font is available; clean it up otherwise."""
+    note = FIGURES / "MISSING_FONTS.md"
+    if found:
+        if note.exists():
+            note.unlink()
+        return
+    message = (
+        "# Missing CJK Fonts\n\n"
+        "No Chinese-capable font was found among the candidates:\n\n"
+        + "\n".join(f"- {name}" for name in CJK_FONT_CANDIDATES)
+        + "\n\nFigures were still rendered, but Chinese labels may show as "
+        "missing-glyph boxes. Install one of the fonts above and re-run "
+        "`scripts/make_report_figures.py`.\n"
+    )
+    note.write_text(message, encoding="utf-8")
+    print("[warning] no CJK font found; Chinese figure text may not render. "
+          f"See {note.relative_to(ROOT)}")
 
 
 def read_csv(path: Path) -> List[Dict[str, str]]:
@@ -65,15 +116,14 @@ def configure_matplotlib():
         import matplotlib.pyplot as plt
         from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 
+        found = detect_cjk_fonts()
+        write_font_note(found)
+        if found:
+            print(f"[font] using CJK font: {found[0]}")
         plt.rcParams.update(
             {
-                "font.sans-serif": [
-                    "Microsoft YaHei",
-                    "SimHei",
-                    "Noto Sans CJK SC",
-                    "Arial Unicode MS",
-                    "DejaVu Sans",
-                ],
+                # Detected CJK font first, then a Latin fallback for ASCII glyphs.
+                "font.sans-serif": found + ["DejaVu Sans"],
                 "axes.unicode_minus": False,
                 "font.size": 11,
                 "axes.titlesize": 11,
@@ -157,45 +207,135 @@ def exact_row(category: str, instance: str, family: str, variant: str | None = N
 
 
 def fig01_architecture(plt, FancyArrowPatch, FancyBboxPatch) -> None:
-    fig, ax = plt.subplots(figsize=(12.8, 3.4))
+    """Paper-style vertical architecture and data-flow diagram.
+
+    Renders a top-down pipeline with rounded boxes, a unified palette and
+    uniform arrows. Outputs both PNG (referenced by the report) and SVG.
+    """
+    fig_w, fig_h = 6.6, 10.2
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    ax.set_xlim(0, fig_w)
+    ax.set_ylim(0, fig_h)
+    ax.set_aspect("equal")
     ax.set_axis_off()
-    labels = [
-        "TSPLIB95 .tsp",
-        "Parser",
-        "DistanceMatrix",
-        "SA / QLSA Core",
-        "Serial / OpenMP / CUDA",
-        "CSV Results",
-        "Analysis & Report",
-    ]
-    colors = ["#e8f1ff", "#e8f1ff", "#e8f1ff", "#fff7ed", "#ecfdf5", "#f8fafc", "#f8fafc"]
-    x0, y0, w, h, gap = 0.02, 0.38, 0.125, 0.32, 0.018
-    for idx, label in enumerate(labels):
-        x = x0 + idx * (w + gap)
-        box = FancyBboxPatch(
-            (x, y0),
-            w,
-            h,
-            boxstyle="round,pad=0.018,rounding_size=0.012",
-            linewidth=1.25,
-            edgecolor="#111827",
-            facecolor=colors[idx],
-        )
-        ax.add_patch(box)
-        ax.text(x + w / 2, y0 + h / 2, label, ha="center", va="center", fontsize=10)
-        if idx < len(labels) - 1:
-            ax.add_patch(
-                FancyArrowPatch(
-                    (x + w + 0.004, y0 + h / 2),
-                    (x + w + gap - 0.004, y0 + h / 2),
-                    arrowstyle="->",
-                    mutation_scale=13,
-                    linewidth=1.2,
-                    color="#334155",
-                )
+
+    cx = fig_w / 2.0
+    text_color = "#111827"
+    arrow_color = "#475569"
+
+    # Unified palette: layer -> (facecolor, edgecolor).
+    pal = {
+        "input": ("#eef2f7", "#64748b"),   # blue-gray input layer
+        "core": ("#dbeafe", "#3b82f6"),    # light blue core data layer
+        "algo": ("#ffedd5", "#f97316"),    # light orange algorithm layer
+        "serial": ("#e5e7eb", "#6b7280"),  # gray serial backend
+        "openmp": ("#dcfce7", "#22c55e"),  # green OpenMP backend
+        "cuda": ("#fee2e2", "#ef4444"),    # red CUDA backend
+        "output": ("#ede9fe", "#8b5cf6"),  # light purple output layer
+        "band": ("#f8fafc", "#cbd5e1"),    # backend container band
+    }
+
+    def box(x, y, w, h, kind, edge_lw=1.2):
+        fc, ec = pal[kind]
+        ax.add_patch(
+            FancyBboxPatch(
+                (x, y),
+                w,
+                h,
+                boxstyle="round,pad=0,rounding_size=0.09",
+                linewidth=edge_lw,
+                edgecolor=ec,
+                facecolor=fc,
+                mutation_aspect=1.0,
             )
-    ax.set_title("System Architecture and Data Flow", pad=10)
+        )
+
+    def label(x, y, s, size=10.5, color=text_color):
+        ax.text(x, y, s, ha="center", va="center", fontsize=size, color=color)
+
+    def arrow(y_from, y_to, x=None):
+        xx = cx if x is None else x
+        ax.add_patch(
+            FancyArrowPatch(
+                (xx, y_from),
+                (xx, y_to),
+                arrowstyle="-|>",
+                mutation_scale=12,
+                linewidth=1.2,
+                color=arrow_color,
+                shrinkA=0,
+                shrinkB=0,
+            )
+        )
+
+    gap = 0.33
+    single_h, layered_h, band_h = 0.62, 0.98, 1.15
+    single_w, wide_w, band_w = 2.8, 5.4, 5.8
+    y = fig_h - 0.35
+
+    def single(text, kind):
+        nonlocal y
+        box(cx - single_w / 2, y - single_h, single_w, single_h, kind)
+        label(cx, y - single_h / 2, text)
+        y -= single_h
+
+    def gap_arrow():
+        nonlocal y
+        arrow(y, y - gap)
+        y -= gap
+
+    def layered(title, cells, kind):
+        nonlocal y
+        box(cx - wide_w / 2, y - layered_h, wide_w, layered_h, kind)
+        label(cx, y - 0.24, title, size=9.0, color="#475569")
+        band = wide_w - 0.5
+        x0 = cx - band / 2
+        cw = band / len(cells)
+        cy = y - layered_h + 0.36
+        _, ec = pal[kind]
+        for i, c in enumerate(cells):
+            label(x0 + cw * (i + 0.5), cy, c, size=9.5)
+            if i > 0:
+                xdiv = x0 + cw * i
+                ax.plot([xdiv, xdiv], [y - layered_h + 0.16, cy + 0.18], color=ec, lw=0.8, alpha=0.7)
+        y -= layered_h
+
+    def backend_band():
+        nonlocal y
+        box(cx - band_w / 2, y - band_h, band_w, band_h, "band", edge_lw=1.0)
+        label(cx, y - 0.22, "并行后端", size=9.0, color="#475569")
+        inner_w, inner_gap, inner_h = 1.6, 0.3, 0.6
+        group_w = inner_w * 3 + inner_gap * 2
+        gx0 = cx - group_w / 2
+        iy = y - band_h + 0.18
+        for i, (t, k) in enumerate([("Serial 串行", "serial"), ("OpenMP 多链", "openmp"), ("CUDA 后端", "cuda")]):
+            ix = gx0 + i * (inner_w + inner_gap)
+            box(ix, iy, inner_w, inner_h, k, edge_lw=1.1)
+            label(ix + inner_w / 2, iy + inner_h / 2, t, size=9.5)
+        y -= band_h
+
+    single("TSPLIB95 .tsp 文件", "input")
+    gap_arrow()
+    single("解析器（Parser）", "input")
+    gap_arrow()
+    single("实例（Instance）", "input")
+    gap_arrow()
+    layered("核心数据层", ["距离矩阵", "路径（Tour）", "RNG"], "core")
+    gap_arrow()
+    layered("搜索核心", ["SA", "QLSA", "2-opt 增量"], "algo")
+    gap_arrow()
+    backend_band()
+    gap_arrow()
+    single("CSV 结果", "output")
+    gap_arrow()
+    single("分析脚本", "output")
+    gap_arrow()
+    single("图表 + 报告", "output")
+
     save(fig, FIGURES / "fig01_architecture_pipeline.png")
+    svg_path = FIGURES / "fig01_architecture_pipeline.svg"
+    fig.savefig(svg_path, bbox_inches="tight", facecolor="white")
+    print(f"[figure] {svg_path.relative_to(ROOT)}")
     plt.close(fig)
 
 
@@ -207,8 +347,8 @@ def fig02_openmp_speedup(plt, rows: Dict[Tuple[str, str], Dict[str, str]]) -> No
     width = 0.36
     bars1 = ax.bar([i - width / 2 for i in x], sa, width, label="SA", color=COLORS["sa"])
     bars2 = ax.bar([i + width / 2 for i in x], qlsa, width, label="QLSA", color=COLORS["qlsa"])
-    ax.set_title("OpenMP Speedup across TSPLIB95 Instances")
-    ax.set_ylabel("Speedup")
+    ax.set_title("OpenMP 多实例加速比")
+    ax.set_ylabel("加速比（Speedup）")
     ax.set_xticks(x, INSTANCES)
     add_light_grid(ax)
     ax.legend(frameon=False)
@@ -226,9 +366,9 @@ def fig03_openmp_efficiency(plt, rows: Dict[Tuple[str, str], Dict[str, str]]) ->
     width = 0.36
     bars1 = ax.bar([i - width / 2 for i in x], sa, width, label="SA", color=COLORS["sa"])
     bars2 = ax.bar([i + width / 2 for i in x], qlsa, width, label="QLSA", color=COLORS["qlsa"])
-    ax.axhline(100, color="#111827", linestyle="--", linewidth=1.0, label="Ideal 100%")
-    ax.set_title("OpenMP Parallel Efficiency")
-    ax.set_ylabel("Efficiency (%)")
+    ax.axhline(100, color="#111827", linestyle="--", linewidth=1.0, label="理想 100%")
+    ax.set_title("OpenMP 多实例并行效率")
+    ax.set_ylabel("并行效率 Efficiency（%）")
     ax.set_xticks(x, INSTANCES)
     ax.set_ylim(0, 110)
     add_light_grid(ax)
@@ -245,18 +385,18 @@ def fig04_default_gap(plt, rows: Dict[Tuple[str, str], Dict[str, str]]) -> None:
     qlsa = [num(rows.get((inst, "qlsa")), "gap_percent") for inst in INSTANCES]
     fig, ax = plt.subplots(figsize=(9.6, 4.8))
     width = 0.36
-    bars1 = ax.bar([i - width / 2 for i in x], sa, width, label="SA default", color=COLORS["sa"])
-    bars2 = ax.bar([i + width / 2 for i in x], qlsa, width, label="QLSA default", color=COLORS["qlsa"])
+    bars1 = ax.bar([i - width / 2 for i in x], sa, width, label="SA 默认", color=COLORS["sa"])
+    bars2 = ax.bar([i + width / 2 for i in x], qlsa, width, label="QLSA 默认", color=COLORS["qlsa"])
     for idx, inst in enumerate(INSTANCES):
         if inst in HARD_INSTANCES:
             ax.axvspan(idx - 0.5, idx + 0.5, color="#fef3c7", alpha=0.23)
-    ax.set_title("Default-Parameter Gap")
-    ax.set_ylabel("Gap (%)")
+    ax.set_title("默认参数 Gap 对比")
+    ax.set_ylabel("Gap（%）")
     ax.set_xticks(x, INSTANCES)
     add_light_grid(ax)
     ax.legend(frameon=False)
-    add_bar_labels(ax, bars1, "{:.3f}")
-    add_bar_labels(ax, bars2, "{:.3f}")
+    add_bar_labels(ax, bars1, "{:.2f}")
+    add_bar_labels(ax, bars2, "{:.2f}")
     save(fig, FIGURES / "fig04_default_gap.png")
     plt.close(fig)
 
@@ -276,17 +416,17 @@ def fig05_tuning_curve(plt, rows: Dict[Tuple[str, str], Dict[str, str]]) -> None
     x = list(range(len(labels)))
     width = 0.26
     fig, ax = plt.subplots(figsize=(10.8, 5.0))
-    bars1 = ax.bar([i - width for i in x], default_gap, width, label="Default", color=COLORS["muted"])
-    bars2 = ax.bar(x, tuned_gap, width, label="Tuned validation", color=COLORS["sa"])
-    bars3 = ax.bar([i + width for i in x], targeted_gap, width, label="Targeted high-budget", color=COLORS["openmp"])
-    ax.set_title("Gap Reduction after Tuning and Targeted Enhancement")
-    ax.set_ylabel("Minimum Gap (%)")
+    bars1 = ax.bar([i - width for i in x], default_gap, width, label="默认参数", color=COLORS["muted"])
+    bars2 = ax.bar(x, tuned_gap, width, label="调参验证", color=COLORS["sa"])
+    bars3 = ax.bar([i + width for i in x], targeted_gap, width, label="定向高预算", color=COLORS["openmp"])
+    ax.set_title("调参与定向增强后的 Gap 改善")
+    ax.set_ylabel("最小 Gap（%）")
     ax.set_xticks(x, labels)
     add_light_grid(ax)
     ax.legend(frameon=False)
-    add_bar_labels(ax, bars1, "{:.3f}")
-    add_bar_labels(ax, bars2, "{:.3f}")
-    add_bar_labels(ax, bars3, "{:.3f}")
+    add_bar_labels(ax, bars1, "{:.2f}")
+    add_bar_labels(ax, bars2, "{:.2f}")
+    add_bar_labels(ax, bars3, "{:.2f}")
     save(fig, FIGURES / "fig05_tuning_curve.png")
     plt.close(fig)
 
@@ -307,8 +447,8 @@ def fig06_policy_comparison(plt) -> None:
         offset = (idx - 0.5) * width
         bars = ax.bar([i + offset for i in x], values, width, label=policy, color=COLORS["qlsa"] if idx == 0 else "#ffbb78")
         add_bar_labels(ax, bars, "{:.2f}")
-    ax.set_title("QLSA Policy Comparison")
-    ax.set_ylabel("Mean Gap (%)")
+    ax.set_title("QLSA 策略对比")
+    ax.set_ylabel("平均 Gap（%）")
     ax.set_xticks(x, HARD_INSTANCES)
     add_light_grid(ax)
     ax.legend(frameon=False)
@@ -321,14 +461,14 @@ def fig07_cuda_positioning(plt) -> None:
     if not rows:
         return
     row_map = {row["algorithm"]: row for row in rows}
-    labels = ["SA serial", "SA OpenMP", "SA CUDA", "QLSA serial", "QLSA OpenMP", "QLSA CUDA"]
+    labels = ["SA 串行", "SA OpenMP", "SA CUDA", "QLSA 串行", "QLSA OpenMP", "QLSA CUDA"]
     algs = ["sa-multichain", "sa-omp", "sa-cuda", "qlsa-multichain", "qlsa-omp", "qlsa-cuda"]
     values = [num(row_map.get(alg), "elapsed_ms_mean") / 1000.0 for alg in algs]
     colors = [COLORS["muted"], COLORS["openmp"], COLORS["cuda"], "#cbd5e1", COLORS["qlsa"], COLORS["cuda"]]
     fig, ax = plt.subplots(figsize=(9.6, 4.8))
     bars = ax.bar(range(len(labels)), values, color=colors)
-    ax.set_title("berlin52 Serial, OpenMP and CUDA Positioning")
-    ax.set_ylabel("Elapsed time (s)")
+    ax.set_title("CUDA 在 berlin52 上的定位实验")
+    ax.set_ylabel("运行时间（秒）")
     ax.set_xticks(range(len(labels)), labels, rotation=12)
     add_light_grid(ax)
     add_bar_labels(ax, bars, "{:.2f}")
@@ -344,8 +484,8 @@ def fig08_paper_runtime(plt, rows: Dict[Tuple[str, str], Dict[str, str]]) -> Non
     series = [
         ("Paper-SA", [num(paper.get(inst), "paper_sa_s") for inst in INSTANCES], COLORS["paper"]),
         ("Paper-QLSA-epsilon", [num(paper.get(inst), "paper_qlsa_epsilon_s") for inst in INSTANCES], "#bdbdbd"),
-        ("Our-SA-OpenMP", [num(rows.get((inst, "sa")), "omp_ms") / 1000.0 for inst in INSTANCES], COLORS["sa"]),
-        ("Our-QLSA-OpenMP", [num(rows.get((inst, "qlsa")), "omp_ms") / 1000.0 for inst in INSTANCES], COLORS["qlsa"]),
+        ("本文 SA-OpenMP", [num(rows.get((inst, "sa")), "omp_ms") / 1000.0 for inst in INSTANCES], COLORS["sa"]),
+        ("本文 QLSA-OpenMP", [num(rows.get((inst, "qlsa")), "omp_ms") / 1000.0 for inst in INSTANCES], COLORS["qlsa"]),
     ]
     fig, ax = plt.subplots(figsize=(10.8, 5.0))
     width = 0.18
@@ -353,8 +493,8 @@ def fig08_paper_runtime(plt, rows: Dict[Tuple[str, str], Dict[str, str]]) -> Non
         offset = (idx - 1.5) * width
         ax.bar([i + offset for i in x], values, width, label=label, color=color)
     ax.set_yscale("log")
-    ax.set_title("Runtime Reference Comparison with the Paper")
-    ax.set_ylabel("Elapsed time (s, log scale)")
+    ax.set_title("与论文运行时间参考对比")
+    ax.set_ylabel("运行时间（秒，对数轴）")
     ax.set_xticks(x, INSTANCES)
     add_light_grid(ax)
     ax.legend(frameon=False, ncols=2)
@@ -379,9 +519,9 @@ def fig09_paper_quality(plt) -> None:
     x = list(range(len(HARD_INSTANCES)))
     series = [
         ("Paper-SA", [paper_sa[inst] for inst in HARD_INSTANCES], COLORS["paper"]),
-        ("Paper-best QLSA", [paper_best[inst] for inst in HARD_INSTANCES], "#bdbdbd"),
-        ("Our best SA", our_sa, COLORS["sa"]),
-        ("Our best QLSA", our_qlsa, COLORS["qlsa"]),
+        ("Paper 最优 QLSA", [paper_best[inst] for inst in HARD_INSTANCES], "#bdbdbd"),
+        ("本文最优 SA", our_sa, COLORS["sa"]),
+        ("本文最优 QLSA", our_qlsa, COLORS["qlsa"]),
     ]
     fig, ax = plt.subplots(figsize=(9.8, 4.9))
     width = 0.19
@@ -389,8 +529,8 @@ def fig09_paper_quality(plt) -> None:
         offset = (idx - 1.5) * width
         bars = ax.bar([i + offset for i in x], values, width, label=label, color=color)
         add_bar_labels(ax, bars, "{:.2f}")
-    ax.set_title("Hard-Instance Mean Gap Comparison")
-    ax.set_ylabel("Mean Gap (%)")
+    ax.set_title("困难实例平均 Gap 对比")
+    ax.set_ylabel("平均 Gap（%）")
     ax.set_xticks(x, HARD_INSTANCES)
     add_light_grid(ax)
     ax.legend(frameon=False, ncols=2)
@@ -416,10 +556,10 @@ def fig10_openmp_scaling(plt) -> None:
             label = f"{inst} {alg.replace('-omp', '').upper()}"
             ax.plot(xs, ys, linestyle=style, marker="o", linewidth=1.8, color=color, label=label)
     xs = [1, 2, 4, 8, 12, 16]
-    ax.plot(xs, xs, linestyle=":", color=COLORS["muted"], linewidth=1.3, label="Ideal")
-    ax.set_title("Supplementary OpenMP Thread Scaling")
-    ax.set_xlabel("Threads")
-    ax.set_ylabel("Speedup")
+    ax.plot(xs, xs, linestyle=":", color=COLORS["muted"], linewidth=1.3, label="理想")
+    ax.set_title("OpenMP 线程扩展性（补充）")
+    ax.set_xlabel("线程数")
+    ax.set_ylabel("加速比（Speedup）")
     add_light_grid(ax)
     ax.legend(frameon=False, ncols=2)
     save(fig, FIGURES / "fig10_openmp_scaling_threads.png")

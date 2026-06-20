@@ -129,7 +129,7 @@ docs/final/reproduction_commands.md
 py scripts\make_report_figures.py
 py scripts\check_privacy_and_encoding.py
 py scripts\check_report_assets.py
-py scripts\check_report_format.py docs\final\final_report_master_v2.md
+py scripts\check_report_format.py docs\final\final_report_master.md
 ctest --test-dir build-cuda-ninja --output-on-failure
 ```
 
@@ -151,7 +151,7 @@ scripts\run_targeted_quality.bat
 主报告入口：
 
 ```text
-docs/final/final_report_master_v2.md
+docs/final/final_report_master.md
 ```
 
 报告 manifest：
@@ -193,7 +193,9 @@ docs/final/known_limitations.md
 ```powershell
 py scripts\check_privacy_and_encoding.py
 py scripts\check_report_assets.py
-py scripts\check_report_format.py docs\final\final_report_master_v2.md
+py scripts\check_report_format.py docs\final\final_report_master.md
+py scripts\check_report_format.py docs\final\final_report_course.md
+py scripts\check_report_format.py docs\final\final_report_public.md
 py scripts\check_final_submission.py
 ctest --test-dir build-cuda-ninja --output-on-failure
 ```

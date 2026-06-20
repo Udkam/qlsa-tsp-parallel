@@ -18,7 +18,7 @@ def parse_args():
     p.add_argument("--input", default="results/policy_comparison_raw.csv")
     p.add_argument("--summary", default="results/policy_comparison_summary.csv")
     p.add_argument("--markdown", default="docs/policy_comparison_analysis.md")
-    p.add_argument("--figure", default="figures/fig_policy_comparison.png")
+    p.add_argument("--figure", default="figures/final/fig_policy_comparison.png")
     return p.parse_args()
 
 
@@ -63,7 +63,7 @@ def write_figure(summary_rows, figure_path: Path):
     x = list(range(len(instances)))
     width = 0.35
     fig, ax = plt.subplots(figsize=(8.6, 4.8))
-    colors = {"epsilon-greedy": "#f97316", "softmax": "#fb923c"}
+    colors = {"epsilon-greedy": "#ff7f0e", "softmax": "#ffbb78"}
     for idx, policy in enumerate(policies):
         data = [values.get((inst, policy), 0.0) for inst in instances]
         offs = [v + (idx - 0.5) * width for v in x]

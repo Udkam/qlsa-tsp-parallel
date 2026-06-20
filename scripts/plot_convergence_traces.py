@@ -39,7 +39,7 @@ def write_doc(root: Path, instances):
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
     trace_dir = root / "results" / "traces"
-    fig_dir = root / "figures"
+    fig_dir = root / "figures" / "final"
     fig_dir.mkdir(exist_ok=True)
     files = sorted(trace_dir.glob("*_budget_sweep.csv"))
     if not files:
@@ -69,7 +69,7 @@ def main() -> int:
         for row in rows:
             by_alg[row["algorithm"]].append(row)
         fig, ax = plt.subplots(figsize=(8.4, 4.8))
-        for alg, color in [("sa", "#2563eb"), ("qlsa", "#f97316")]:
+        for alg, color in [("sa", "#1f77b4"), ("qlsa", "#ff7f0e")]:
             points = sorted(by_alg[alg], key=lambda r: int(r["iteration_budget"]))
             xs = [int(r["iteration_budget"]) for r in points]
             ys = [gap(inst, float(r["best_length"])) for r in points]

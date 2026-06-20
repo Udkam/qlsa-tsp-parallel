@@ -1,0 +1,7 @@
+algorithm,instance,dimension,iterations,seed,init,chains,threads,parallel,best_length,final_length,elapsed_ms,accepted_moves,improved_moves
+sa-multichain,berlin52,52,100000,1,nn,32,1,none,7542,7542,118.609,301673,148300
+sa-omp,berlin52,52,100000,1,nn,32,8,omp,7542,7542,23.752,301673,148300
+sa-cuda,berlin52,52,100000,1,nn,32,128,cuda,7542,7542,1206.997,302260,148533
+qlsa-multichain,berlin52,52,100000,1,nn,32,1,none,7670,7670,257.857,330804,152005
+qlsa-omp,berlin52,52,100000,1,nn,32,8,omp,7670,7670,57.091,330804,152005
+qlsa-cuda,berlin52,52,100000,1,nn,32,128,cuda,7542,7542,1260.992,334060,152570

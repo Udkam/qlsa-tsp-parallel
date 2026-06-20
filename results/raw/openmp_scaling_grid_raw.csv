@@ -1,0 +1,5 @@
+algorithm,instance,dimension,iterations,seed,init,chains,threads,parallel,best_length,final_length,elapsed_ms,accepted_moves,improved_moves
+sa-omp,berlin52,52,100000,1,nn,8,1,omp,7542,7542,27.629,75398,37250
+qlsa-omp,berlin52,52,100000,1,nn,8,1,omp,7788,7788,58.192,82248,37751
+sa-omp,berlin52,52,100000,1,nn,8,2,omp,7542,7542,15.865,75398,37250
+qlsa-omp,berlin52,52,100000,1,nn,8,2,omp,7788,7788,32.530,82248,37751

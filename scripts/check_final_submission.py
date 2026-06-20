@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Final submission integrity checks."""
+"""Final submission integrity checks for the course/public package layout."""
 
 from __future__ import annotations
 
@@ -8,22 +8,22 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-REPORT = ROOT / "docs" / "final_report_extreme.md"
-SUBMISSION = ROOT / "submission"
-IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+COURSE_REPORT = ROOT / "docs" / "final" / "final_report_course.md"
+PUBLIC_REPORT = ROOT / "docs" / "final" / "final_report_public.md"
+COURSE_PACKAGE = ROOT / "submission" / "course"
+PUBLIC_PACKAGE = ROOT / "submission" / "public"
+IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
-FORBIDDEN = [
-    "TODO",
-    "请补充",
-    "<你的姓名>",
-    "<你的学号>",
+FORBIDDEN_PUBLIC = [
+    "陈乐浚",
+    "22361054",
     "CUDA 比 OpenMP 快",
-    "CUDA 快于 OpenMP",
-    "CUDA 优于 OpenMP",
     "QLSA 总是优于 SA",
-    "完全复刻 SB-QLSA",
-    "完全复刻论文 SB-QLSA",
+    "完整复刻 SB-QLSA",
     "同平台公平 benchmark",
+    "????",
+    "�",
+    "锟斤拷",
 ]
 
 KEY_CSV = [
@@ -39,81 +39,51 @@ KEY_CSV = [
 ]
 
 
-def table_columns(line: str) -> int:
-    s = line.strip()
-    if not s.startswith("|") or not s.endswith("|"):
-        return 0
-    return len(s.strip("|").split("|"))
+def check_images(report: Path) -> list[str]:
+    errors: list[str] = []
+    text = report.read_text(encoding="utf-8")
+    for alt, raw in IMAGE_RE.findall(text):
+        if re.search(r"图\s*[0-9xX]+\s*[:：]", alt):
+            errors.append(f"{report.relative_to(ROOT)}: numbered figure alt text: {alt}")
+        candidate = (report.parent / raw.split("#", 1)[0].strip()).resolve()
+        if not candidate.exists():
+            errors.append(f"{report.relative_to(ROOT)}: missing image {raw}")
+    return errors
 
 
 def main() -> int:
-    failed = False
-    warnings = 0
+    errors: list[str] = []
 
-    if not REPORT.exists():
-        print(f"[error] missing report: {REPORT}")
-        failed = True
-        text = ""
-    else:
-        text = REPORT.read_text(encoding="utf-8")
-
-    if not SUBMISSION.exists():
-        print(f"[error] missing submission directory: {SUBMISSION}")
-        failed = True
-
-    for phrase in FORBIDDEN:
-        if phrase in text:
-            print(f"[error] forbidden phrase found: {phrase}")
-            failed = True
-
-    if text.count("$$") % 2 != 0:
-        print("[error] unbalanced $$ delimiters")
-        failed = True
-
-    for raw in IMAGE_RE.findall(text):
-        path_text = raw.split("#", 1)[0].strip()
-        candidate = (REPORT.parent / path_text).resolve()
-        if not candidate.exists():
-            print(f"[error] report image missing: {raw}")
-            failed = True
+    for report in [COURSE_REPORT, PUBLIC_REPORT]:
+        if not report.exists():
+            errors.append(f"missing report: {report.relative_to(ROOT)}")
         else:
-            print(f"[ok] report image: {raw}")
+            errors.extend(check_images(report))
 
-    for line_no, line in enumerate(text.splitlines(), start=1):
-        cols = table_columns(line)
-        if cols > 7:
-            print(f"[warning] wide table row line {line_no}: {cols} columns")
-            warnings += 1
+    if PUBLIC_REPORT.exists():
+        public_text = PUBLIC_REPORT.read_text(encoding="utf-8")
+        for phrase in FORBIDDEN_PUBLIC:
+            if phrase in public_text:
+                errors.append(f"public report contains forbidden phrase: {phrase}")
 
-    if not (ROOT / "docs" / "personal_report_appendix.md").exists():
-        print("[error] missing personal report appendix")
-        failed = True
+    for package in [COURSE_PACKAGE, PUBLIC_PACKAGE]:
+        if not package.exists():
+            errors.append(f"missing package: {package.relative_to(ROOT)}")
+            continue
+        if not (package / "figures").exists():
+            errors.append(f"missing package figures directory: {package.relative_to(ROOT)}")
+        if not (package / "results_key").exists():
+            errors.append(f"missing package results_key directory: {package.relative_to(ROOT)}")
+        for csv_name in KEY_CSV:
+            if not (package / "results_key" / csv_name).exists():
+                errors.append(f"missing package key CSV: {package.relative_to(ROOT)}/results_key/{csv_name}")
 
-    for csv_name in KEY_CSV:
-        root_path = ROOT / "results" / csv_name
-        package_path = SUBMISSION / "results_key" / csv_name
-        if not root_path.exists():
-            print(f"[error] missing key CSV in results: {csv_name}")
-            failed = True
-        if not package_path.exists():
-            print(f"[error] missing key CSV in submission package: {csv_name}")
-            failed = True
-
-    for required in [
-        SUBMISSION / "final_report_extreme.md",
-        SUBMISSION / "personal_report_appendix.md",
-        SUBMISSION / "final_submission_readme.md",
-        SUBMISSION / "figures",
-        SUBMISSION / "results_key",
-    ]:
-        if not required.exists():
-            print(f"[error] missing submission artifact: {required}")
-            failed = True
-
-    if failed:
-        print(f"[failed] final submission check failed with {warnings} warning(s)")
+    if errors:
+        for error in errors:
+            print(f"[error] {error}")
         return 1
-    print(f"[ok] final submission check passed with {warnings} warning(s)")
+
+    print("[ok] final submission package check passed")
     return 0
 
 

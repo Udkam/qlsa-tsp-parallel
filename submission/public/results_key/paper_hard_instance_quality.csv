@@ -1,0 +1,16 @@
+instance,bks,algorithm,best,mean,std,max,gap_mean_percent
+eil76,538,Paper-SA,565,599.9,24.893,640,11.5056
+eil76,538,Paper-QLSA-softmax,551,562.9,9.550,583,4.6283
+eil76,538,Paper-QLSA-epsilon,553,566.5,6.241,574,5.2974
+eil76,538,Paper-SB-QLSA-softmax,549,558.9,7.838,572,3.8848
+eil76,538,Paper-SB-QLSA-epsilon,558,571.8,10.581,591,6.2825
+rat99,1211,Paper-SA,1348,1428.9,71.6,1536,17.9934
+rat99,1211,Paper-QLSA-softmax,1249,1298.2,40.9,1377,7.2007
+rat99,1211,Paper-QLSA-epsilon,1231,1282.3,34.46,1342,5.888
+rat99,1211,Paper-SB-QLSA-softmax,1241,1286.7,23.8,1315,6.2494
+rat99,1211,Paper-SB-QLSA-epsilon,1273,1322.0,56.3,1463,9.1659
+eil101,629,Paper-SA,644,686.3,34.42,747,9.1097
+eil101,629,Paper-QLSA-softmax,643,665.9,13.40,686,5.8665
+eil101,629,Paper-QLSA-epsilon,641,666.9,18.48,701,6.0254
+eil101,629,Paper-SB-QLSA-softmax,650,664.4,11.9,682,5.6279
+eil101,629,Paper-SB-QLSA-epsilon,652,670.1,15.37,700,6.5342

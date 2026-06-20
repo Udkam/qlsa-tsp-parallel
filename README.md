@@ -1,274 +1,199 @@
-# TSP Q-Learning Assisted SA Parallelization
+# TSP Q-Learning Assisted Simulated Annealing Parallelization
 
-本项目用于并行算法期末大作业：**面向旅行推销员问题的 Q-Learning 辅助模拟退火算法并行化实现与性能优化**。
+面向旅行推销员问题（TSP）的 Q-Learning 辅助模拟退火算法并行化实现与性能优化。项目基于 2026 年 QLSA for TSP 论文思想，完成 C++20 工程化实现，并提供 OpenMP 多链并行、CUDA 后端工程验证、自动化实验与最终报告材料。
 
-目标是在 C++ 底层实现 TSP 的模拟退火、Q-Learning 辅助模拟退火，并逐步加入 OpenMP/CUDA 多链并行优化。当前阶段已完成串行 SA、串行 QLSA、OpenMP 多链并行、CUDA 多链并行工程实现，以及 Step 5A 的实验自动化与 berlin52 结果统计。
+## 核心结论
 
-## 当前完成内容
+- **OpenMP 是主要性能结论**：默认参数多实例实验中，SA OpenMP 平均 speedup 约 **5.46x**，QLSA OpenMP 平均 speedup 约 **4.98x**。
+- **QLSA 是质量增强结论**：在 targeted high-budget 实验中，`rat99` 上 QLSA 达到 BKS=1211，而 SA high-budget 最好为 1212。
+- **CUDA 是工程扩展结论**：CUDA 后端已完成真实构建和运行验证，但在 berlin52 等小规模实例上不优于 OpenMP，因此不作为主要加速证据。
+- **论文对比是参考对比**：参考论文使用 Python/Xeon 环境，本项目使用 C++20/OpenMP/CUDA 和本地硬件，运行时间不可解释为同平台严格 benchmark。
 
-- C++20 + CMake 工程骨架；
-- TSPLIB95 `.tsp` 解析器；
+## 工程内容
+
+- C++20 + CMake 工程；
+- TSPLIB95 `.tsp` parser，支持坐标型和显式矩阵型实例；
 - `EUC_2D`、`CEIL_2D`、`GEO`、`ATT`、`EXPLICIT` 距离支持；
-- 一维连续数组 `DistanceMatrix`；
-- Tour 合法性检查、nearest-neighbor 初始化、路径长度计算、2-opt delta；
-- 串行 SA + 2-opt 基线；
-- 串行 Q-Learning-Assisted SA (QLSA)；
-- OpenMP 多搜索链并行 SA/QLSA；
-- CUDA 多搜索链并行 SA/QLSA；
-- 实验脚本、日志归档、统计汇总和 Markdown 分析文档生成。
+- 一维连续数组 `DistanceMatrix`，便于 CPU cache 访问和 CUDA 拷贝；
+- Tour 合法性检查、nearest-neighbor 初始化、random 初始化、O(1) 2-opt delta；
+- 串行 SA baseline；
+- Q-Learning Assisted SA，支持 epsilon-greedy 和 Softmax policy；
+- OpenMP chain-level multi-chain 并行；
+- CUDA multi-chain 后端；
+- 实验脚本、CSV 汇总、图表生成、报告检查和提交包整理。
+
+## 目录结构
+
+```text
+include/tsp/        C++ 头文件
+src/                C++/CUDA 实现
+tests/              assert-based 测试
+scripts/            实验、分析、图表和检查脚本
+configs/            调优与定向增强配置
+data/               本地 TSPLIB95 数据目录，.tsp 文件默认不入库
+results/final/      最终报告关键 CSV 与 RESULTS_INDEX.md
+results/raw/        原始实验 CSV
+results/summary/    汇总 CSV
+results/reference/  论文表格参考数据
+figures/final/      最终报告图表
+docs/final/         最终报告、manifest、复现命令和限制说明
+submission/public/  脱敏公开展示包
+```
+
+详细结构说明见：
+
+- `docs/final/PROJECT_STRUCTURE.md`
+- `results/final/RESULTS_INDEX.md`
+- `docs/final/REPORT_MANIFEST.md`
 
 ## 构建
 
-默认尝试启用 OpenMP 和 CUDA：
+推荐 CUDA/Ninja 构建：
 
-```bash
+```powershell
+cmake -S . -B build-cuda-ninja -G Ninja -DCMAKE_BUILD_TYPE=Release -DTSP_ENABLE_CUDA=ON
+cmake --build build-cuda-ninja -j
+```
+
+CPU/OpenMP 构建：
+
+```powershell
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
-Visual Studio 多配置生成器下建议显式构建 Release：
-
-```bash
-cmake --build build --config Release --parallel
-```
-
-CUDA 构建推荐使用 Ninja，例如已有的 `build-cuda-ninja/tsp_sa.exe`。如果检测到 CUDA fallback warning，则该结果不能作为真实 GPU 数据。
+若 CUDA 构建失败，应先确认 Ninja、MSVC 环境和 `nvcc` 是否可用。CUDA fallback 或无法真实编译 kernel 的结果不能作为 GPU 性能证据。
 
 ## 测试
 
-```bash
-ctest --test-dir build --output-on-failure
+```powershell
+ctest --test-dir build-cuda-ninja --output-on-failure
 ```
 
-测试不依赖外部 TSPLIB 数据，会使用 `tests/fixtures/square4.tsp`。
+测试不依赖外部 TSPLIB 数据，包含小实例、并行路径和 CUDA smoke test。
 
-## 基本运行
+## 数据准备
 
-串行 SA：
+`data/*.tsp` 默认不提交到仓库。可以使用脚本尝试下载：
 
-```bash
-./build/tsp_sa --input data/berlin52.tsp --iterations 1000000 --seed 1 --init nn
+```powershell
+bash scripts/download_tsplib_subset.sh
 ```
 
-串行 QLSA：
+也可以手动下载 TSPLIB95 `.tsp` 文件并放入 `data/`，例如：
 
-```bash
-./build/tsp_sa --qlsa --input data/berlin52.tsp --iterations 1000000 --seed 1 --init nn --alpha 0.1 --gamma 0.9 --epsilon 0.1 --policy epsilon-greedy
+```text
+data/berlin52.tsp
+data/eil76.tsp
+data/rat99.tsp
+data/eil101.tsp
 ```
 
-OpenMP 多链 SA：
+## 单次运行示例
 
-```bash
-./build/tsp_sa --input data/berlin52.tsp --parallel omp --chains 32 --threads 8 --iterations 1000000 --seed 1 --init nn
+SA + OpenMP：
+
+```powershell
+.\build-cuda-ninja\tsp_sa.exe --input data/berlin52.tsp --parallel omp --chains 32 --threads 8 --iterations 1000000 --seed 1 --init nn
 ```
 
-CUDA 多链 QLSA：
+QLSA + OpenMP：
 
-```bash
-./build/tsp_sa --qlsa --input data/berlin52.tsp --parallel cuda --chains 32 --cuda_block_size 128 --iterations 1000000 --seed 1 --init nn --alpha 0.1 --gamma 0.9 --epsilon 0.1 --policy epsilon-greedy
+```powershell
+.\build-cuda-ninja\tsp_sa.exe --qlsa --input data/berlin52.tsp --parallel omp --chains 32 --threads 8 --iterations 1000000 --seed 1 --init nn --alpha 0.1 --gamma 0.9 --epsilon 0.1 --policy epsilon-greedy
 ```
 
-CSV 字段：
+QLSA + CUDA：
+
+```powershell
+.\build-cuda-ninja\tsp_sa.exe --qlsa --input data/berlin52.tsp --parallel cuda --chains 32 --cuda_block_size 128 --iterations 1000000 --seed 1 --init nn --alpha 0.1 --gamma 0.9 --epsilon 0.1 --policy epsilon-greedy
+```
+
+程序输出包含人类可读摘要和 CSV 行。CSV 字段包括：
 
 ```text
 algorithm,instance,dimension,iterations,seed,init,chains,threads,parallel,best_length,final_length,elapsed_ms,accepted_moves,improved_moves
 ```
 
-## Step 5A 实验结果与自动化
+## 实验复现
 
-手动 berlin52 结果已归档：
-
-```text
-results/berlin52_manual_raw.csv
-results/berlin52_summary.csv
-docs/step5_berlin52_analysis.md
-```
-
-重新统计手动结果：
-
-```bash
-python scripts/analyze_results.py --input results/berlin52_manual_raw.csv --output results/berlin52_summary.csv --markdown docs/step5_berlin52_analysis.md
-```
-
-一键运行 quick smoke test：
-
-```bash
-python scripts/run_step5_experiments.py --quick
-```
-
-在 Windows 上如果 `python` 指向 Microsoft Store alias，可改用：
-
-```powershell
-py scripts\run_step5_experiments.py --quick
-```
-
-Windows 包装脚本：
-
-```bat
-scripts\run_step5_quick.bat
-```
-
-一键运行 berlin52 完整实验：
-
-```bat
-scripts\run_step5_berlin52.bat
-```
-
-一键运行多个实例：
-
-```bash
-python scripts/run_step5_experiments.py --instances berlin52 eil51 st70 eil76 rat99 eil101 --iterations 1000000 --repeat 3 --chains 32 --threads 8 --cuda-block-size 128 --output results/step5_multi_raw.csv
-```
-
-实验脚本会：
-
-- 优先使用 `build-cuda-ninja/tsp_sa.exe`；
-- 保存完整日志到 `results/logs/`；
-- 从 stdout 抽取 CSV 数据行；
-- 检测 fallback warning；
-- 自动调用 `scripts/analyze_results.py` 生成 summary CSV 和 Markdown。
-
-当前 berlin52 结果说明：
-
-- berlin52 BKS 为 7542；
-- 当前 SA/QLSA 串行多链、OpenMP、CUDA 版本均达到 best_length=7542，Gap=0%；
-- OpenMP 是当前 berlin52 上的主要加速结果；
-- CUDA 已完成工程扩展并可真实运行，但在 berlin52 小规模实例上可能受 kernel 启动、访存和每链工作量不足影响，暂未优于 OpenMP。
-
-## Step 6A 参数调优与 OpenMP 扩展性实验
-
-快速调参 smoke test：
-
-```powershell
-py scripts\tune_params.py --quick
-```
-
-分析调参结果：
-
-```powershell
-py scripts\analyze_tuning.py --input results\tuning_raw.csv
-```
-
-SA/QLSA 全量调参：
-
-```powershell
-py scripts\tune_params.py --instances eil76 rat99 eil101 --algorithm both --stage all --iterations 1000000 --repeat 3 --chains 32 --threads 8 --output results\tuning_raw.csv
-```
-
-OpenMP 扩展性实验：
-
-```powershell
-py scripts\run_openmp_scaling_grid.py
-```
-
-OpenMP 扩展性 quick smoke test：
-
-```powershell
-py scripts\run_openmp_scaling_grid.py --quick
-```
-
-输出文件：
+最终报告相关复现命令集中记录在：
 
 ```text
-results/tuning_raw.csv
-results/tuning_summary.csv
-docs/step6A_tuning_analysis.md
-results/openmp_scaling_grid_raw.csv
-results/openmp_scaling_grid_summary.csv
-docs/step6A_openmp_scaling_analysis.md
+docs/final/reproduction_commands.md
 ```
 
-说明：quick 只用于验证脚本链路，不代表调参已经完成。完整结论需要运行全量调参和完整 OpenMP scaling grid。
+常用命令：
 
-## Step 6B 调优参数固化与独立验证
-
-Step 6A 是参数搜索；Step 6B 将搜索得到的参数固化到配置文件，并使用独立 seed 进行验证，避免只引用 tuning search 中挑出来的 best result。最终报告应优先引用 Step 6B 的验证结果。
-
-调优参数文件：
-```text
-configs/tuned_params.json
+```powershell
+py scripts\make_report_figures.py
+py scripts\check_privacy_and_encoding.py
+py scripts\check_report_assets.py
+py scripts\check_report_format.py docs\final\final_report_master_v2.md
+ctest --test-dir build-cuda-ninja --output-on-failure
 ```
 
-快速验证：
-```bat
-scripts\run_tuned_validation_quick.bat
+默认参数多实例实验：
+
+```powershell
+py scripts\run_step5_experiments.py --instances berlin52 eil51 st70 eil76 rat99 eil101 --iterations 1000000 --repeat 3 --chains 32 --threads 8 --no-cuda --output results\raw\step5_multi_cpu_raw.csv
 ```
 
-完整独立验证：
-```bat
+调优验证与定向增强：
+
+```powershell
 scripts\run_tuned_validation.bat
-```
-
-输出文件：
-```text
-results/tuned_validation_raw.csv
-results/tuned_validation_summary.csv
-docs/step6B_tuned_validation_analysis.md
-```
-
-说明：完整验证默认使用 `repeat=10`、`seed=101`，即每个配置使用独立的 seed=101 到 seed=110；quick 模式只运行 eil76 的 SA/QLSA 各一次，用于验证脚本链路。
-
-## Step 6C 定向增强实验
-
-Step 6C 不做新的全量网格调参，而是在 Step 6B 较优配置附近增加搜索预算，重点观察 `eil101` 和 `rat99` 在更大 `chains` / `iterations` 下的解质量稳定性。`chains` 增大表示一次实验启动更多独立搜索链，`iterations` 增大表示单条链搜索更充分，两者都可能提高找到更好解的概率，但会增加运行时间。
-
-配置文件：
-```text
-configs/targeted_quality_configs.json
-```
-
-快速测试：
-```bat
-scripts\run_targeted_quality_quick.bat
-```
-
-完整运行：
-```bat
 scripts\run_targeted_quality.bat
 ```
 
-输出文件：
-```text
-results/targeted_quality_raw.csv
-results/targeted_quality_summary.csv
-docs/step6C_targeted_quality_analysis.md
-```
+## 最终报告与提交包
 
-说明：quick 模式只运行 `eil101 SA` 的一个小预算配置，用于验证脚本链路；完整结论需要运行 `repeat=5` 的完整定向增强实验。
-
-## Step 6D 最终实验结果汇总
-
-最终报告应优先引用以下汇总文件，而不是从各阶段 raw CSV 中手动摘抄：
+主报告入口：
 
 ```text
-docs/final_experiment_summary.md
-results/final_key_results.csv
+docs/final/final_report_master_v2.md
 ```
 
-其中 `docs/final_experiment_summary.md` 汇总 Step 5B 默认参数 OpenMP 加速结果、Step 6B 独立验证质量结果、Step 6C 定向增强质量结果，并明确 CUDA 结果在最终报告中的定位；`results/final_key_results.csv` 提供可直接复制到报告表格中的关键数值。
+报告 manifest：
 
-## 其他批量脚本
-
-串行 baseline：
-
-```bash
-bash scripts/run_baseline.sh
+```text
+docs/final/REPORT_MANIFEST.md
 ```
 
-OpenMP scaling：
+公开展示包：
 
-```bash
-bash scripts/run_omp_scaling.sh
+```text
+submission/public/
 ```
 
-CUDA scaling：
+课程提交包：
 
-```bash
-bash scripts/run_cuda_scaling.sh
+```text
+submission/course/
 ```
 
-## 后续计划
+`submission/course/` 可能包含课程要求的个人信息，默认不建议提交到公开仓库。公开仓库应使用 `submission/public/` 和 `docs/final/final_report_public.md`。
 
-- 扩展 eil51、st70、eil76、rat99、eil101 等实例实验；
-- 优化 CUDA block 内候选 2-opt 并行评价；
-- 整理论文对比表、speedup、parallel efficiency、Gap 和最终报告。
+## 已知限制
+
+- 当前 CUDA 后端未充分优化，小规模 TSPLIB95 实例上不优于 OpenMP。
+- 当前 QLSA 是基于论文思想的工程化变体，不是完整 SB-QLSA candidate-leader + diversity-state 复刻。
+- policy comparison 比较的是本实现中的 epsilon-greedy 与 Softmax，不等同于论文 Softmax 机制复现。
+- 与论文 Table 8 的运行时间对比涉及不同语言、不同硬件和不同实现，只能作为参考对比。
+- 预算扫描不能表述为真实逐迭代 trace。
+
+完整限制见：
+
+```text
+docs/final/known_limitations.md
+```
+
+## 提交前检查
+
+```powershell
+py scripts\check_privacy_and_encoding.py
+py scripts\check_report_assets.py
+py scripts\check_report_format.py docs\final\final_report_master_v2.md
+py scripts\check_final_submission.py
+ctest --test-dir build-cuda-ninja --output-on-failure
+```

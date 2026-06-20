@@ -1,20 +1,33 @@
-﻿build/
+# Build outputs
+build/
 build-*/
-results/*.csv
-!results/berlin52_manual_raw.csv
-!results/berlin52_summary.csv
-results/*.log
+out/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Experiment logs and temporary files
+*.log
 results/logs/
+data/*.tmp
+
+# Downloaded TSPLIB data
 data/*.tsp
 data/*.tsp.gz
-data/*.tmp
+
+# IDE and local user files
 *.user
 *.suo
 *.vcxproj.user
-docs/
-submission/
+.vs/
 
+# Private course submission package; public package remains trackable.
+submission/course/
+
+# Local PDFs and private assignment/source material
 PA-final-2026.pdf
 选题报告.md
 选题报告.pdf
 Q-learning旅行商问题.pdf
+*.tmp.pdf

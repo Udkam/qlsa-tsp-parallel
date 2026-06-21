@@ -1,47 +1,67 @@
 # 复现命令
 
-以下命令均在项目根目录执行。Windows 环境建议使用 `py` 启动 Python 脚本；如果本机 `python` 命令可用，也可以替换为 `python`。
+以下命令均在项目根目录执行。Windows 环境建议使用 `py` 启动 Python 脚本；Ubuntu VM 中使用 `python3`。报告仅使用 VM1/VM2 代称，本地 IP、用户名和 SSH 细节不进入提交包。
 
 ## 构建与测试
 
-```bat
-cmake -S . -B build-cuda-ninja -G Ninja -DCMAKE_BUILD_TYPE=Release -DTSP_ENABLE_CUDA=ON
-cmake --build build-cuda-ninja -j
+```powershell
+cmd /c "call ""C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"" -arch=x64 && cmake -S . -B build-cuda-ninja -G Ninja -DCMAKE_BUILD_TYPE=Release -DTSP_ENABLE_CUDA=ON -DTSP_ENABLE_MPI=ON"
+cmd /c "call ""C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"" -arch=x64 && cmake --build build-cuda-ninja -j"
 ctest --test-dir build-cuda-ninja --output-on-failure
 ```
 
-## 默认参数多实例实验
+## 默认参数 OpenMP 实验
 
-```bat
+```powershell
 py scripts\run_step5_experiments.py --instances berlin52 eil51 st70 eil76 rat99 eil101 --iterations 1000000 --repeat 3 --chains 32 --threads 8 --no-cuda --output results\raw\step5_multi_cpu_raw.csv
 ```
 
-## 调优参数独立验证
+## 调优与定向增强
 
-```bat
+```powershell
 scripts\run_tuned_validation.bat
-```
-
-## 定向增强实验
-
-```bat
 scripts\run_targeted_quality.bat
 ```
 
-## 图表生成
+## CUDA candidate / QLSA candidate
 
-```bat
-py scripts\make_report_figures.py
+```powershell
+py scripts\run_cuda_candidate_experiments.py --instances berlin52 eil101 ch130 a280 --algorithms sa qlsa --iterations 500000 --repeat 3 --chains 64 --block-sizes 128 --candidates-per-iter 128 --reversal-modes serial parallel --output results\raw\cuda_qlsa_candidate_raw.csv
+py scripts\analyze_cuda_qlsa_candidate.py --input results\raw\cuda_qlsa_candidate_raw.csv --output results\summary\cuda_qlsa_candidate_summary.csv --markdown docs\final\cuda_qlsa_candidate_analysis.md --figure figures\final\fig21_cuda_qlsa_candidate.png
+py scripts\analyze_cuda_reversal.py --input results\raw\cuda_qlsa_candidate_raw.csv --output results\summary\cuda_reversal_summary.csv --markdown docs\final\cuda_reversal_analysis.md --figure figures\final\fig22_cuda_parallel_reversal.png
 ```
 
-## 提交前检查
+## 大实例 OpenMP / CUDA
 
-```bat
-py scripts\check_privacy_and_encoding.py
-py scripts\check_report_assets.py
-py scripts\check_report_format.py docs\final\final_report_master.md
+```powershell
+py scripts\run_large_openmp.py --tier L1 --iterations 1000000 --repeat 3 --chains 64 --threads 8 --output results\raw\large_openmp_l1_raw.csv
+py scripts\analyze_large_openmp.py --input results\raw\large_openmp_l1_raw.csv --output results\summary\large_openmp_l1_summary.csv
+
+py scripts\run_large_cuda.py --instances ch130 a280 lin318 rat575 --iterations 500000 --repeat 3 --chains 64 --block-size 128 --candidates-per-iter 128 --output results\raw\large_cuda_formal_raw.csv
+py scripts\analyze_large_cuda.py --input results\raw\large_cuda_formal_raw.csv --output results\summary\large_cuda_formal_summary.csv
+```
+
+## MPI + OpenMP VM 实验
+
+在 VM1 上执行：
+
+```bash
+cd ~/parallel-algorithm
+export PATH=$HOME/ompi-4.1.2/bin:$PATH
+export LD_LIBRARY_PATH=$HOME/ompi-4.1.2/lib:${LD_LIBRARY_PATH:-}
+python3.8 scripts/run_large_mpi_vm.py --instances ch130 a280 --np 1 2 --threads 2 4 --chains 64 --iterations 300000 --repeat 3 --hostfile mpi_hosts.local --output results/raw/large_mpi_vm_formal_aggressive_raw.csv --summary results/summary/large_mpi_vm_formal_aggressive_summary.csv --timeout 600
+```
+
+Windows 侧分析：
+
+```powershell
+py scripts\analyze_large_mpi_vm.py --input results\raw\large_mpi_vm_formal_aggressive_raw.csv --output results\summary\large_mpi_vm_formal_aggressive_summary.csv --markdown docs\final\large_mpi_vm_analysis.md --figure figures\final\fig18_large_mpi_vm_scaling.png
+```
+
+## 报告检查
+
+```powershell
 py scripts\check_report_format.py docs\final\final_report_course.md
-py scripts\check_report_format.py docs\final\final_report_public.md
-py scripts\check_final_submission.py
-ctest --test-dir build-cuda-ninja --output-on-failure
+py scripts\check_report_assets.py
+py scripts\check_privacy_and_encoding.py
 ```

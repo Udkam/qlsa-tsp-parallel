@@ -1,0 +1,9 @@
+instance,algorithm,cuda_mode,block_size,candidates_per_iter,iterations,serial_ms_mean,parallel_ms_mean,parallel_speedup_vs_serial,serial_best,parallel_best,serial_gap,parallel_gap
+a280,qlsa-cuda-candidate,candidate,128,128,500000,2951.8377,1985.0100,1.4871,2579,2579,0.0000,0.0000
+a280,sa-cuda-candidate,candidate,128,128,500000,1574.8533,1512.6417,1.0411,2579,2579,0.0000,0.0000
+berlin52,qlsa-cuda-candidate,candidate,128,128,500000,2400.0500,2105.4867,1.1399,7542,7542,0.0000,0.0000
+berlin52,sa-cuda-candidate,candidate,128,128,500000,1518.8570,1471.3747,1.0323,7542,7542,0.0000,0.0000
+ch130,qlsa-cuda-candidate,candidate,128,128,500000,2728.9450,2046.8920,1.3332,6110,6110,0.0000,0.0000
+ch130,sa-cuda-candidate,candidate,128,128,500000,1405.4387,1363.9870,1.0304,6110,6110,0.0000,0.0000
+eil101,qlsa-cuda-candidate,candidate,128,128,500000,2586.6643,2072.5657,1.2480,629,629,0.0000,0.0000
+eil101,sa-cuda-candidate,candidate,128,128,500000,1416.2903,1367.9687,1.0353,629,629,0.0000,0.0000

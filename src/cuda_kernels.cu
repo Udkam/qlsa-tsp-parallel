@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -97,10 +98,28 @@ __device__ void reverse_segment(int* tour, int i, int k) {
     }
 }
 
+__device__ void reverse_segment_parallel(int* tour, int i, int k) {
+    const int swaps = (k - i + 1) / 2;
+    for (int offset = threadIdx.x; offset < swaps; offset += blockDim.x) {
+        const int left = i + offset;
+        const int right = k - offset;
+        const int tmp = tour[left];
+        tour[left] = tour[right];
+        tour[right] = tmp;
+    }
+}
+
 __device__ void copy_tour(int* dst, const int* src, int n) {
     for (int i = 0; i < n; ++i) {
         dst[i] = src[i];
     }
+}
+
+__device__ double* aligned_double_ptr(int* after_ints) {
+    uintptr_t address = reinterpret_cast<uintptr_t>(after_ints);
+    address = (address + static_cast<uintptr_t>(alignof(double) - 1)) &
+              ~static_cast<uintptr_t>(alignof(double) - 1);
+    return reinterpret_cast<double*>(address);
 }
 
 __device__ void init_identity(int* tour, int n) {
@@ -352,6 +371,160 @@ __global__ void sa_kernel(const int* dm,
     }
 }
 
+__global__ void sa_candidate_kernel(const int* dm,
+                                    int n,
+                                    int chains,
+                                    long long iterations,
+                                    double initial_temperature,
+                                    double final_temperature,
+                                    unsigned long long base_seed,
+                                    int use_nearest_neighbor_init,
+                                    int candidates_per_iter,
+                                    int parallel_reversal,
+                                    int* best_tours,
+                                    DeviceChainSummary* summaries) {
+    const int chain_id = blockIdx.x;
+    if (chain_id >= chains) {
+        return;
+    }
+
+    extern __shared__ unsigned char shared_bytes[];
+    int* current = reinterpret_cast<int*>(shared_bytes);
+    int* best = current + n;
+    int* used = best + n;
+    int* candidate_delta = used + n;
+    int* candidate_i = candidate_delta + blockDim.x;
+    int* candidate_k = candidate_i + blockDim.x;
+
+    __shared__ int shared_current_length;
+    __shared__ int shared_best_length;
+    __shared__ long long shared_accepted;
+    __shared__ long long shared_improved;
+    __shared__ unsigned long long shared_seed_value;
+    __shared__ double shared_temperature;
+    __shared__ int shared_accept;
+    __shared__ int shared_selected_i;
+    __shared__ int shared_selected_k;
+    __shared__ int shared_selected_delta;
+
+    if (threadIdx.x == 0) {
+        uint64_t rng_state = splitmix64_device(base_seed + kSeedStride * static_cast<uint64_t>(chain_id + 1));
+        shared_seed_value = rng_state;
+
+        if (use_nearest_neighbor_init != 0) {
+            init_nearest_neighbor(current, used, dm, n);
+        } else {
+            init_random_tour(current, n, rng_state);
+        }
+        shared_current_length = tour_length_device(current, dm, n);
+        shared_best_length = shared_current_length;
+        shared_accepted = 0;
+        shared_improved = 0;
+        shared_temperature = initial_temperature;
+        copy_tour(best, current, n);
+    }
+    __syncthreads();
+
+    const double temp_decay = pow(final_temperature / initial_temperature,
+                                  1.0 / static_cast<double>(iterations));
+
+    for (long long iter = 0; n >= 3 && iter < iterations; ++iter) {
+        const int tid = threadIdx.x;
+        if (tid < candidates_per_iter) {
+            uint64_t local_rng = splitmix64_device(
+                base_seed ^
+                (kSeedStride * static_cast<uint64_t>(chain_id + 1)) ^
+                (0xBF58476D1CE4E5B9ULL * static_cast<uint64_t>(iter + 1)) ^
+                (0x94D049BB133111EBULL * static_cast<uint64_t>(tid + 1)));
+            int i = 0;
+            int k = 1;
+            sample_random_move(n, i, k, local_rng);
+            candidate_i[tid] = i;
+            candidate_k[tid] = k;
+            candidate_delta[tid] = delta_2opt_device(current, dm, n, i, k);
+        } else {
+            candidate_i[tid] = 0;
+            candidate_k[tid] = 1;
+            candidate_delta[tid] = INT_MAX;
+        }
+        __syncthreads();
+
+        for (int stride = 1; stride < blockDim.x; stride <<= 1) {
+            const int period = stride << 1;
+            if ((tid % period) == 0) {
+                const int other = tid + stride;
+                if (other < blockDim.x) {
+                    const int other_delta = candidate_delta[other];
+                    const int self_delta = candidate_delta[tid];
+                    if (other_delta < self_delta ||
+                        (other_delta == self_delta && candidate_i[other] < candidate_i[tid])) {
+                        candidate_delta[tid] = other_delta;
+                        candidate_i[tid] = candidate_i[other];
+                        candidate_k[tid] = candidate_k[other];
+                    }
+                }
+            }
+            __syncthreads();
+        }
+
+        if (threadIdx.x == 0) {
+            const int i = candidate_i[0];
+            const int k = candidate_k[0];
+            const int delta = candidate_delta[0];
+            uint64_t accept_rng = splitmix64_device(
+                base_seed +
+                kSeedStride * static_cast<uint64_t>(chain_id + 1) +
+                0xD1B54A32D192ED03ULL * static_cast<uint64_t>(iter + 1));
+            bool accept = delta < 0;
+            if (!accept) {
+                accept = rng_uniform01(accept_rng) < exp(-static_cast<double>(delta) / shared_temperature);
+            }
+            shared_accept = accept ? 1 : 0;
+            shared_selected_i = i;
+            shared_selected_k = k;
+            shared_selected_delta = delta;
+        }
+        __syncthreads();
+
+        if (shared_accept != 0) {
+            if (parallel_reversal != 0) {
+                reverse_segment_parallel(current, shared_selected_i, shared_selected_k);
+            } else if (threadIdx.x == 0) {
+                reverse_segment(current, shared_selected_i, shared_selected_k);
+            }
+        }
+        __syncthreads();
+
+        if (threadIdx.x == 0) {
+            const int delta = shared_selected_delta;
+            if (shared_accept != 0) {
+                shared_current_length += delta;
+                ++shared_accepted;
+                if (delta < 0) {
+                    ++shared_improved;
+                }
+                if (shared_current_length < shared_best_length) {
+                    shared_best_length = shared_current_length;
+                    copy_tour(best, current, n);
+                }
+            }
+            shared_temperature *= temp_decay;
+        }
+        __syncthreads();
+    }
+
+    if (threadIdx.x == 0) {
+        for (int city = 0; city < n; ++city) {
+            best_tours[chain_id * n + city] = best[city];
+        }
+        summaries[chain_id].best_length = shared_best_length;
+        summaries[chain_id].final_length = shared_current_length;
+        summaries[chain_id].accepted_moves = shared_accepted;
+        summaries[chain_id].improved_moves = shared_improved;
+        summaries[chain_id].seed = shared_seed_value;
+    }
+}
+
 __global__ void qlsa_kernel(const int* dm,
                             int n,
                             int chains,
@@ -380,7 +553,7 @@ __global__ void qlsa_kernel(const int* dm,
     int* current = reinterpret_cast<int*>(shared_bytes);
     int* best = current + n;
     int* used = best + n;
-    double* q_table = reinterpret_cast<double*>(used + n);
+    double* q_table = aligned_double_ptr(used + n);
 
     if (threadIdx.x == 0) {
         uint64_t rng_state = splitmix64_device(base_seed + kSeedStride * static_cast<uint64_t>(chain_id + 1));
@@ -464,6 +637,209 @@ __global__ void qlsa_kernel(const int* dm,
     }
 }
 
+__global__ void qlsa_candidate_kernel(const int* dm,
+                                      int n,
+                                      int chains,
+                                      long long iterations,
+                                      double initial_temperature,
+                                      double final_temperature,
+                                      unsigned long long base_seed,
+                                      int use_nearest_neighbor_init,
+                                      double alpha,
+                                      double gamma,
+                                      double epsilon,
+                                      int policy_softmax,
+                                      double softmax_temperature,
+                                      int state_window,
+                                      double delta_scale,
+                                      const DeviceAction* actions,
+                                      int action_count,
+                                      int candidates_per_iter,
+                                      int parallel_reversal,
+                                      int* best_tours,
+                                      DeviceChainSummary* summaries) {
+    const int chain_id = blockIdx.x;
+    if (chain_id >= chains) {
+        return;
+    }
+
+    extern __shared__ unsigned char shared_bytes[];
+    int* current = reinterpret_cast<int*>(shared_bytes);
+    int* best = current + n;
+    int* used = best + n;
+    double* q_table = aligned_double_ptr(used + n);
+    int* candidate_delta = reinterpret_cast<int*>(q_table + kStateCount * action_count);
+    int* candidate_i = candidate_delta + blockDim.x;
+    int* candidate_k = candidate_i + blockDim.x;
+
+    __shared__ int shared_current_length;
+    __shared__ int shared_best_length;
+    __shared__ long long shared_accepted;
+    __shared__ long long shared_improved;
+    __shared__ unsigned long long shared_seed_value;
+    __shared__ double shared_temperature;
+    __shared__ int shared_action_index;
+    __shared__ int shared_state;
+    __shared__ int shared_next_state;
+    __shared__ int shared_accept;
+    __shared__ int shared_selected_i;
+    __shared__ int shared_selected_k;
+    __shared__ int shared_selected_delta;
+    __shared__ double shared_reward;
+
+    if (threadIdx.x == 0) {
+        uint64_t rng_state = splitmix64_device(base_seed + kSeedStride * static_cast<uint64_t>(chain_id + 1));
+        shared_seed_value = rng_state;
+
+        for (int i = 0; i < kStateCount * action_count; ++i) {
+            q_table[i] = 0.0;
+        }
+
+        if (use_nearest_neighbor_init != 0) {
+            init_nearest_neighbor(current, used, dm, n);
+        } else {
+            init_random_tour(current, n, rng_state);
+        }
+        shared_current_length = tour_length_device(current, dm, n);
+        shared_best_length = shared_current_length;
+        shared_accepted = 0;
+        shared_improved = 0;
+        shared_temperature = initial_temperature;
+        shared_state = state_from_average_delta(0.0, delta_scale);
+        copy_tour(best, current, n);
+    }
+    __syncthreads();
+
+    const double temp_decay = pow(final_temperature / initial_temperature,
+                                  1.0 / static_cast<double>(iterations));
+
+    int recent[kMaxStateWindow];
+    int recent_count = 0;
+    int recent_pos = 0;
+    double recent_sum = 0.0;
+    const int window = max(1, min(state_window, kMaxStateWindow));
+    uint64_t action_rng = splitmix64_device(
+        base_seed + kSeedStride * static_cast<uint64_t>(chain_id + 1) +
+        0xD1B54A32D192ED03ULL);
+
+    for (long long iter = 0; n >= 3 && iter < iterations; ++iter) {
+        if (threadIdx.x == 0) {
+            shared_action_index = select_action(q_table, shared_state, action_count, policy_softmax,
+                                                epsilon, softmax_temperature, action_rng);
+        }
+        __syncthreads();
+
+        const int tid = threadIdx.x;
+        if (tid < candidates_per_iter) {
+            uint64_t local_rng = splitmix64_device(
+                base_seed ^
+                (kSeedStride * static_cast<uint64_t>(chain_id + 1)) ^
+                (0xBF58476D1CE4E5B9ULL * static_cast<uint64_t>(iter + 1)) ^
+                (0x94D049BB133111EBULL * static_cast<uint64_t>(tid + 1)) ^
+                (0xD1B54A32D192ED03ULL * static_cast<uint64_t>(shared_action_index + 1)));
+            int i = 0;
+            int k = 1;
+            sample_action_move(n, actions[shared_action_index], i, k, local_rng);
+            candidate_i[tid] = i;
+            candidate_k[tid] = k;
+            candidate_delta[tid] = delta_2opt_device(current, dm, n, i, k);
+        } else {
+            candidate_i[tid] = 0;
+            candidate_k[tid] = 1;
+            candidate_delta[tid] = INT_MAX;
+        }
+        __syncthreads();
+
+        for (int stride = 1; stride < blockDim.x; stride <<= 1) {
+            const int period = stride << 1;
+            if ((tid % period) == 0) {
+                const int other = tid + stride;
+                if (other < blockDim.x) {
+                    const int other_delta = candidate_delta[other];
+                    const int self_delta = candidate_delta[tid];
+                    if (other_delta < self_delta ||
+                        (other_delta == self_delta && candidate_i[other] < candidate_i[tid])) {
+                        candidate_delta[tid] = other_delta;
+                        candidate_i[tid] = candidate_i[other];
+                        candidate_k[tid] = candidate_k[other];
+                    }
+                }
+            }
+            __syncthreads();
+        }
+
+        if (threadIdx.x == 0) {
+            const int delta = candidate_delta[0];
+            uint64_t accept_rng = splitmix64_device(
+                base_seed +
+                kSeedStride * static_cast<uint64_t>(chain_id + 1) +
+                0x94D049BB133111EBULL * static_cast<uint64_t>(iter + 1));
+            bool accept = delta < 0;
+            if (!accept) {
+                accept = rng_uniform01(accept_rng) < exp(-static_cast<double>(delta) / shared_temperature);
+            }
+            shared_accept = accept ? 1 : 0;
+            shared_selected_i = candidate_i[0];
+            shared_selected_k = candidate_k[0];
+            shared_selected_delta = delta;
+            shared_reward = reward_from_delta(delta, accept);
+        }
+        __syncthreads();
+
+        if (shared_accept != 0) {
+            if (parallel_reversal != 0) {
+                reverse_segment_parallel(current, shared_selected_i, shared_selected_k);
+            } else if (threadIdx.x == 0) {
+                reverse_segment(current, shared_selected_i, shared_selected_k);
+            }
+        }
+        __syncthreads();
+
+        if (threadIdx.x == 0) {
+            const int delta = shared_selected_delta;
+            if (shared_accept != 0) {
+                shared_current_length += delta;
+                ++shared_accepted;
+                if (delta < 0) {
+                    ++shared_improved;
+                }
+                if (shared_current_length < shared_best_length) {
+                    shared_best_length = shared_current_length;
+                    copy_tour(best, current, n);
+                }
+            }
+
+            if (recent_count < window) {
+                recent[recent_count++] = delta;
+                recent_sum += static_cast<double>(delta);
+            } else {
+                recent_sum -= static_cast<double>(recent[recent_pos]);
+                recent[recent_pos] = delta;
+                recent_sum += static_cast<double>(delta);
+                recent_pos = (recent_pos + 1) % window;
+            }
+            const double average_delta = recent_sum / static_cast<double>(recent_count);
+            shared_next_state = state_from_average_delta(average_delta, delta_scale);
+            update_q(q_table, action_count, shared_state, shared_action_index,
+                     shared_next_state, shared_reward, alpha, gamma);
+            shared_state = shared_next_state;
+            shared_temperature *= temp_decay;
+        }
+        __syncthreads();
+    }
+
+    if (threadIdx.x == 0) {
+        for (int city = 0; city < n; ++city) {
+            best_tours[chain_id * n + city] = best[city];
+        }
+        summaries[chain_id].best_length = shared_best_length;
+        summaries[chain_id].final_length = shared_current_length;
+        summaries[chain_id].accepted_moves = shared_accepted;
+        summaries[chain_id].improved_moves = shared_improved;
+        summaries[chain_id].seed = shared_seed_value;
+    }
+}
+
 std::vector<DeviceAction> make_device_actions(const QLSAParams& params) {
     const std::vector<QLSAAction> source = params.actions.empty() ? default_qlsa_actions() : params.actions;
     if (source.empty() || source.size() > kMaxActions) {
@@ -486,6 +862,12 @@ void validate_cuda_params(const DistanceMatrix& dm, const ParallelParams& params
     }
     if (params.cuda_block_size < 1 || params.cuda_block_size > 1024) {
         throw std::invalid_argument("cuda_block_size must be in [1, 1024]");
+    }
+    if (params.cuda_candidates_per_iter <= 0) {
+        throw std::invalid_argument("cuda_candidates_per_iter must be positive");
+    }
+    if (params.cuda_candidates_per_iter > params.cuda_block_size) {
+        throw std::invalid_argument("cuda_candidates_per_iter must be <= cuda_block_size");
     }
     const long long iterations = (params.algorithm == AlgorithmKind::SA)
                                      ? params.sa_params.iterations
@@ -524,6 +906,12 @@ ParallelResult build_parallel_result(const DistanceMatrix& dm,
 
         result.total_accepted_moves += chain.accepted_moves;
         result.total_improved_moves += chain.improved_moves;
+        if (!is_valid_tour(chain.best_tour, n)) {
+            throw std::runtime_error("CUDA chain returned an invalid best tour");
+        }
+        if (tour_length(chain.best_tour, dm) != chain.best_length) {
+            throw std::runtime_error("CUDA chain best_length verification failed");
+        }
         if (chain.best_length < best_length) {
             best_length = chain.best_length;
             best_index = chain_id;
@@ -586,13 +974,17 @@ ParallelResult run_cuda_chains_impl(const DistanceMatrix& dm, const ParallelPara
     if (params.algorithm == AlgorithmKind::QLSA) {
         host_actions = make_device_actions(params.qlsa_params);
         action_count = static_cast<int>(host_actions.size());
-        shared_bytes += static_cast<size_t>(kStateCount * action_count) * sizeof(double);
+        shared_bytes += static_cast<size_t>(alignof(double)) +
+                        static_cast<size_t>(kStateCount * action_count) * sizeof(double);
         check_cuda(cudaMalloc(&device_actions, host_actions.size() * sizeof(DeviceAction)),
                    "cudaMalloc(actions)");
         check_cuda(cudaMemcpy(device_actions, host_actions.data(),
                               host_actions.size() * sizeof(DeviceAction),
                               cudaMemcpyHostToDevice),
                    "cudaMemcpy(actions)");
+    }
+    if (params.cuda_mode == CudaMode::Candidate) {
+        shared_bytes += static_cast<size_t>(3 * params.cuda_block_size) * sizeof(int);
     }
     if (shared_bytes > static_cast<size_t>(max_shared)) {
         if (device_actions != nullptr) {
@@ -615,18 +1007,36 @@ ParallelResult run_cuda_chains_impl(const DistanceMatrix& dm, const ParallelPara
                "cudaMemcpy(distance matrix)");
 
     Timer timer;
+    const int parallel_reversal = params.cuda_reversal_mode == CudaReversalMode::Parallel ? 1 : 0;
     if (params.algorithm == AlgorithmKind::SA) {
-        sa_kernel<<<params.chains, params.cuda_block_size, shared_bytes>>>(
-            device_dm, n, params.chains, iterations, initial_temperature, final_temperature,
-            params.base_seed, use_nn, device_best_tours, device_summaries);
+        if (params.cuda_mode == CudaMode::Candidate) {
+            sa_candidate_kernel<<<params.chains, params.cuda_block_size, shared_bytes>>>(
+                device_dm, n, params.chains, iterations, initial_temperature, final_temperature,
+                params.base_seed, use_nn, params.cuda_candidates_per_iter, parallel_reversal,
+                device_best_tours, device_summaries);
+        } else {
+            sa_kernel<<<params.chains, params.cuda_block_size, shared_bytes>>>(
+                device_dm, n, params.chains, iterations, initial_temperature, final_temperature,
+                params.base_seed, use_nn, device_best_tours, device_summaries);
+        }
     } else {
         const QLSAParams& qlsa = params.qlsa_params;
-        qlsa_kernel<<<params.chains, params.cuda_block_size, shared_bytes>>>(
-            device_dm, n, params.chains, iterations, initial_temperature, final_temperature,
-            params.base_seed, use_nn, qlsa.alpha, qlsa.gamma, qlsa.epsilon,
-            qlsa.policy == "softmax" ? 1 : 0, qlsa.softmax_temperature,
-            qlsa.state_window, qlsa.delta_scale, device_actions, action_count,
-            device_best_tours, device_summaries);
+        if (params.cuda_mode == CudaMode::Candidate) {
+            qlsa_candidate_kernel<<<params.chains, params.cuda_block_size, shared_bytes>>>(
+                device_dm, n, params.chains, iterations, initial_temperature, final_temperature,
+                params.base_seed, use_nn, qlsa.alpha, qlsa.gamma, qlsa.epsilon,
+                qlsa.policy == "softmax" ? 1 : 0, qlsa.softmax_temperature,
+                qlsa.state_window, qlsa.delta_scale, device_actions, action_count,
+                params.cuda_candidates_per_iter, parallel_reversal,
+                device_best_tours, device_summaries);
+        } else {
+            qlsa_kernel<<<params.chains, params.cuda_block_size, shared_bytes>>>(
+                device_dm, n, params.chains, iterations, initial_temperature, final_temperature,
+                params.base_seed, use_nn, qlsa.alpha, qlsa.gamma, qlsa.epsilon,
+                qlsa.policy == "softmax" ? 1 : 0, qlsa.softmax_temperature,
+                qlsa.state_window, qlsa.delta_scale, device_actions, action_count,
+                device_best_tours, device_summaries);
+        }
     }
     check_cuda(cudaGetLastError(), "CUDA kernel launch");
     check_cuda(cudaDeviceSynchronize(), "CUDA kernel execution");

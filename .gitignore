@@ -1,33 +1,81 @@
 # Build outputs
 build/
 build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
 out/
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.lib
+*.exp
 
-# Python cache
+# Python caches
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Experiment logs and temporary files
 *.log
+*.log.tmp
+*.tmp
+tmp/
 results/logs/
-data/*.tmp
+results/archive/
+results/traces/
+.mpi_sync_stage/
+mpi_project_sync.tar.gz
+archive/local_cleanup/
 
 # Downloaded TSPLIB data
+# Keep downloaded datasets local by default. Key metadata and summaries are
+# stored under results/final, results/summary, and results/reference.
 data/*.tsp
 data/*.tsp.gz
+data/*.tmp
 
 # IDE and local user files
 *.user
 *.suo
 *.vcxproj.user
 .vs/
+.idea/
+.vscode/
 
-# Private course submission package; public package remains trackable.
+# Local MPI/VM SSH material
+.ssh_mpi_vm_key
+.ssh_mpi_vm_key.pub
+mpi_hosts.local
+*.pem
+*.key
+
+# Profiler outputs
+*.ncu-rep
+*.nsys-rep
+*.qdrep
+*.sqlite
+
+# Browser, screenshot, and GPT handoff artifacts
+docs/dev/screenshots/
+docs/dev/chrome/
+docs/dev/browser/
+docs/dev/gpt_*
+docs/dev/*payload*
+docs/dev/*login*
+docs/dev/*temporary*
+
+# Private course submission package.
+# It may contain name/student-id information. Keep it on disk for course
+# submission, but do not add it to a public repository by accident.
 submission/course/
+submission/final_submission/
 
-# Local PDFs and private assignment/source material
+# Local assignment/source PDFs and private drafts
 PA-final-2026.pdf
+Q-learning旅行商问题.pdf
 选题报告.md
 选题报告.pdf
-Q-learning旅行商问题.pdf
 *.tmp.pdf

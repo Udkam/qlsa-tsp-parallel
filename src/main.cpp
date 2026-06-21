@@ -34,6 +34,9 @@ struct CliOptions {
     int chains = 1;
     int threads = 1;
     int cuda_block_size = 128;
+    std::string cuda_mode = "chain";
+    int cuda_candidates_per_iter = 32;
+    std::string cuda_reversal_mode = "serial";
     double qlsa_alpha = 0.1;
     double qlsa_gamma = 0.9;
     double qlsa_epsilon = 0.1;
@@ -50,6 +53,8 @@ void print_usage(const char* program) {
         << " --input data/berlin52.tsp --parallel omp --chains 8 --threads 4 --iterations 1000000 --seed 1\n"
         << "       " << program
         << " --input data/berlin52.tsp --qlsa --parallel cuda --chains 32 --cuda_block_size 128 --iterations 1000000 --seed 1\n";
+    std::cerr
+        << "CUDA options: --cuda_mode chain|candidate --cuda_candidates_per_iter 32 --cuda_reversal_mode serial|parallel\n";
 }
 
 CliOptions parse_args(int argc, char** argv) {
@@ -89,6 +94,12 @@ CliOptions parse_args(int argc, char** argv) {
             options.threads = std::stoi(require_value(arg));
         } else if (arg == "--cuda_block_size") {
             options.cuda_block_size = std::stoi(require_value(arg));
+        } else if (arg == "--cuda_mode") {
+            options.cuda_mode = require_value(arg);
+        } else if (arg == "--cuda_candidates_per_iter") {
+            options.cuda_candidates_per_iter = std::stoi(require_value(arg));
+        } else if (arg == "--cuda_reversal_mode") {
+            options.cuda_reversal_mode = require_value(arg);
         } else if (arg == "--alpha") {
             options.qlsa_alpha = std::stod(require_value(arg));
         } else if (arg == "--gamma") {
@@ -128,6 +139,18 @@ CliOptions parse_args(int argc, char** argv) {
     }
     if (options.cuda_block_size < 1 || options.cuda_block_size > 1024) {
         throw std::invalid_argument("--cuda_block_size must be in [1, 1024]");
+    }
+    if (options.cuda_mode != "chain" && options.cuda_mode != "candidate") {
+        throw std::invalid_argument("--cuda_mode must be chain or candidate");
+    }
+    if (options.cuda_candidates_per_iter <= 0) {
+        throw std::invalid_argument("--cuda_candidates_per_iter must be positive");
+    }
+    if (options.cuda_candidates_per_iter > options.cuda_block_size) {
+        throw std::invalid_argument("--cuda_candidates_per_iter must be <= --cuda_block_size");
+    }
+    if (options.cuda_reversal_mode != "serial" && options.cuda_reversal_mode != "parallel") {
+        throw std::invalid_argument("--cuda_reversal_mode must be serial or parallel");
     }
     if (options.qlsa_alpha <= 0.0 || options.qlsa_alpha > 1.0) {
         throw std::invalid_argument("--alpha must be in (0, 1]");
@@ -172,7 +195,7 @@ struct RunRow {
 std::string algorithm_label(const CliOptions& options) {
     const std::string base = options.use_qlsa ? "qlsa" : "sa";
     if (options.parallel == "cuda") {
-        return base + "-cuda";
+        return base + "-cuda-" + options.cuda_mode;
     }
     if (options.parallel == "omp") {
         return base + "-omp";
@@ -309,6 +332,9 @@ int main(int argc, char** argv) {
                       << " threads=" << effective_worker_count(options);
             if (options.parallel == "cuda") {
                 std::cout << " cuda_block_size=" << options.cuda_block_size;
+                std::cout << " cuda_mode=" << options.cuda_mode
+                          << " cuda_candidates_per_iter=" << options.cuda_candidates_per_iter
+                          << " cuda_reversal_mode=" << options.cuda_reversal_mode;
             }
             std::cout << '\n';
             if (options.use_qlsa) {
@@ -331,7 +357,7 @@ int main(int argc, char** argv) {
             const tsp::SAParams sa_params = make_sa_params(options, run_seed);
             RunRow row;
 
-            if (options.parallel == "omp" || options.chains > 1) {
+            if (options.parallel == "omp" || options.parallel == "cuda" || options.chains > 1) {
                 tsp::ParallelParams parallel_params;
                 parallel_params.algorithm = options.use_qlsa ? tsp::AlgorithmKind::QLSA : tsp::AlgorithmKind::SA;
                 parallel_params.sa_params = sa_params;
@@ -340,6 +366,13 @@ int main(int argc, char** argv) {
                 parallel_params.threads = (options.parallel == "omp") ? options.threads : 1;
                 parallel_params.cuda_enabled = options.parallel == "cuda";
                 parallel_params.cuda_block_size = options.cuda_block_size;
+                parallel_params.cuda_mode = (options.cuda_mode == "candidate")
+                                                ? tsp::CudaMode::Candidate
+                                                : tsp::CudaMode::Chain;
+                parallel_params.cuda_candidates_per_iter = options.cuda_candidates_per_iter;
+                parallel_params.cuda_reversal_mode = (options.cuda_reversal_mode == "parallel")
+                                                        ? tsp::CudaReversalMode::Parallel
+                                                        : tsp::CudaReversalMode::Serial;
                 parallel_params.base_seed = run_seed;
 
                 const tsp::ParallelResult result = tsp::run_parallel_chains(dm, parallel_params);

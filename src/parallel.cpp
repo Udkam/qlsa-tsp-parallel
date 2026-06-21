@@ -26,6 +26,12 @@ void validate_parallel_params(const ParallelParams& params) {
     if (params.cuda_block_size < 1) {
         throw std::invalid_argument("cuda_block_size must be >= 1");
     }
+    if (params.cuda_candidates_per_iter <= 0) {
+        throw std::invalid_argument("cuda_candidates_per_iter must be positive");
+    }
+    if (params.cuda_candidates_per_iter > params.cuda_block_size) {
+        throw std::invalid_argument("cuda_candidates_per_iter must be <= cuda_block_size");
+    }
     const int64_t iterations = (params.algorithm == AlgorithmKind::SA)
                                    ? params.sa_params.iterations
                                    : params.qlsa_params.sa.iterations;

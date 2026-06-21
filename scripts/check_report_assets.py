@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check image references and high-risk wording in the final report."""
+"""Check course report image references and high-risk wording."""
 
 from __future__ import annotations
 
@@ -9,43 +9,36 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_REPORTS = [
-    ROOT / "docs" / "final" / "final_report_master.md",
-    ROOT / "docs" / "final" / "final_report_course.md",
-    ROOT / "docs" / "final" / "final_report_public.md",
-]
+DEFAULT_REPORT = ROOT / "docs" / "final" / "final_report_course.md"
 IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
 FORBIDDEN_PHRASES = [
     "CUDA 比 OpenMP 快",
-    "CUDA 快于 OpenMP",
     "CUDA 优于 OpenMP",
+    "CUDA 全面优于 OpenMP",
     "QLSA 总是优于 SA",
     "QLSA 全面优于 SA",
     "所有实例都达到 BKS",
-    "默认参数下全部实例均达到 BKS",
-    "完全复刻 SB-QLSA",
+    "完整复刻 SB-QLSA",
     "同平台公平 benchmark",
     "严格公平 benchmark",
-    "图x：",
-    "图X：",
     "<你的姓名>",
     "<你的学号>",
     "<你的专业>",
-    "TODO",
     "请补充",
+    "TODO",
 ]
 
 REQUIRED_CONTENT = [
     "预期目标与实际完成情况",
     "参考论文方法与实现差异",
-    "实施方案设计",
-    "并行算法设计",
-    "实施过程中解决的问题",
+    "方案设计",
+    "并行方案设计",
+    "实施过程与解决的问题",
     "实验设计",
     "实验结果与分析",
-    "与论文结果对比",
-    "工程难度与完成质量",
+    "与近期论文结果对比",
+    "工程难度与证据等级",
     "局限性",
 ]
 
@@ -54,10 +47,7 @@ def choose_report() -> Path:
     if len(sys.argv) >= 2:
         candidate = Path(sys.argv[1])
         return candidate if candidate.is_absolute() else (ROOT / candidate).resolve()
-    for report in DEFAULT_REPORTS:
-        if report.exists():
-            return report
-    return DEFAULT_REPORTS[0]
+    return DEFAULT_REPORT
 
 
 def main() -> int:
@@ -69,14 +59,14 @@ def main() -> int:
     text = report.read_text(encoding="utf-8")
     failed = False
 
-    image_paths = IMAGE_RE.findall(text)
-    if len(image_paths) < 6:
-        print(f"[error] expected at least 6 image references, found {len(image_paths)}")
+    image_refs = IMAGE_RE.findall(text)
+    if len(image_refs) < 6:
+        print(f"[error] expected at least 6 image references, found {len(image_refs)}")
         failed = True
 
-    for alt_text, raw in image_paths:
-        if re.search(r"图\s*[0-9一二三四五六七八九十xX]+\s*[:：]", alt_text):
-            print(f"[error] image alt text uses placeholder figure numbering: {alt_text}")
+    for alt_text, raw in image_refs:
+        if re.search(r"图\s*[0-9一二三四五六七八九十]+\s*[:：]", alt_text):
+            print(f"[error] image alt text should not contain numbered caption: {alt_text}")
             failed = True
         path_part = raw.split("#", 1)[0].strip()
         candidate = (report.parent / path_part).resolve()

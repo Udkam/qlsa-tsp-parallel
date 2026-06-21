@@ -14,6 +14,16 @@ enum class AlgorithmKind {
     QLSA,
 };
 
+enum class CudaMode {
+    Chain,
+    Candidate,
+};
+
+enum class CudaReversalMode {
+    Serial,
+    Parallel,
+};
+
 struct ParallelParams {
     AlgorithmKind algorithm = AlgorithmKind::SA;
 
@@ -24,6 +34,9 @@ struct ParallelParams {
     int threads = 1;
     bool cuda_enabled = false;
     int cuda_block_size = 128;
+    CudaMode cuda_mode = CudaMode::Chain;
+    int cuda_candidates_per_iter = 32;
+    CudaReversalMode cuda_reversal_mode = CudaReversalMode::Serial;
     uint64_t base_seed = 1;
 };
 

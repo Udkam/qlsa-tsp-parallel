@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Check structural and wording constraints for the final report markdown."""
+# -*- coding: utf-8 -*-
+"""Check structural and wording constraints for final-report Markdown."""
 
 from __future__ import annotations
 
@@ -11,8 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
-ERROR_PHRASES = [
-    "# 0.",
+FORBIDDEN_PHRASES = [
     "TODO",
     "请补充",
     "<你的姓名>",
@@ -27,30 +27,47 @@ ERROR_PHRASES = [
     "默认参数下全部实例均达到 BKS",
     "同平台公平 benchmark",
     "严格公平 benchmark",
-    "完全复刻 SB-QLSA",
-    "本项目围绕",
-    "通过本文我们实现了",
-    "可以看到明显提升",
+    "完整复刻 SB-QLSA",
     "图x：",
     "图X：",
 ]
 
-# Single canonical 12-section structure shared by master, course and public reports.
+MOJIBAKE_TOKENS = [
+    "\ufffd",
+    "????",
+    "锟斤拷",
+    "閿熸枻鎷",
+]
+
 REQUIRED_HEADINGS = [
     "# 面向旅行推销员问题的 Q-Learning 辅助模拟退火算法并行化实现与性能优化",
     "## 摘要",
     "## 1. 基本信息",
     "## 2. 预期目标与实际完成情况",
     "## 3. 参考论文方法与实现差异",
-    "## 4. 实施方案设计",
-    "## 5. 并行算法设计",
-    "## 6. 实施过程中解决的问题",
+    "## 4. 方案设计",
+    "## 5. 并行方案设计",
+    "## 6. 实施过程与解决的问题",
     "## 7. 实验设计",
     "## 8. 实验结果与分析",
-    "## 9. 与论文结果对比",
-    "## 10. 工程难度与完成质量",
+    "## 9. 与近期论文结果对比",
+    "## 10. 工程难度与证据等级",
     "## 11. 局限性",
     "## 12. 总结",
+]
+
+REQUIRED_FIGURES = [
+    "fig01_architecture_pipeline.png",
+    "fig02_openmp_speedup.png",
+    "fig03_openmp_efficiency.png",
+    "fig04_default_gap.png",
+    "fig05_tuning_curve.png",
+    "fig06_policy_comparison.png",
+    "fig07_cuda_positioning.png",
+    "fig08_paper_runtime_comparison.png",
+    "fig09_paper_quality_comparison.png",
+    "fig13_mpi_vm_scaling_formal.png",
+    "fig14_hpc_hybrid_architecture.png",
 ]
 
 
@@ -70,13 +87,9 @@ def is_separator(line: str) -> bool:
 
 
 def main() -> int:
-    if len(sys.argv) >= 2:
-        report = Path(sys.argv[1])
-    else:
-        report = ROOT / "docs" / "final" / "final_report_course.md"
+    report = Path(sys.argv[1]) if len(sys.argv) >= 2 else ROOT / "docs" / "final" / "final_report_course.md"
     if not report.is_absolute():
         report = (ROOT / report).resolve()
-
     if not report.exists():
         print(f"[error] report does not exist: {report}")
         return 1
@@ -86,7 +99,12 @@ def main() -> int:
     failed = False
     warnings = 0
 
-    for phrase in ERROR_PHRASES:
+    for token in MOJIBAKE_TOKENS:
+        if token in text:
+            print(f"[error] possible mojibake token found: {token}")
+            failed = True
+
+    for phrase in FORBIDDEN_PHRASES:
         if phrase in text:
             print(f"[error] forbidden phrase found: {phrase}")
             failed = True
@@ -96,16 +114,16 @@ def main() -> int:
             print(f"[error] missing required heading: {heading}")
             failed = True
 
-    has_course_mapping = (
-        ("预期目标" in text and "完成情况" in text and "课程评分点" in text)
-        or ("课程评分点" in text and "课程目标" in text and "报告证据" in text)
-    )
-    if not has_course_mapping:
+    if "课程评分点" not in text or "支撑材料" not in text:
         print("[error] missing course requirement mapping")
         failed = True
 
-    has_time_risk = "绝对时间不可直接比较" in text or "绝对时间不能视作同一平台下的严格性能比较" in text
-    if "不同硬件" not in text or "不同语言" not in text or not has_time_risk:
+    has_risk_statement = (
+        "不同硬件" in text
+        and "不同语言" in text
+        and ("严格基准" in text or "不是严格 benchmark" in text or "不能作为同硬件同语言下的严格基准" in text)
+    )
+    if not has_risk_statement:
         print("[error] missing paper-comparison risk statement")
         failed = True
 
@@ -113,9 +131,14 @@ def main() -> int:
         print("[error] unbalanced $$ math delimiters")
         failed = True
 
-    for alt_text, raw in IMAGE_RE.findall(text):
-        if re.search(r"图\s*[0-9一二三四五六七八九十xX]+\s*[:：]", alt_text):
-            print(f"[error] image alt text uses placeholder figure numbering: {alt_text}")
+    images = IMAGE_RE.findall(text)
+    if len(images) < 8:
+        print("[error] report should reference at least 8 figures")
+        failed = True
+
+    for alt_text, raw in images:
+        if re.search(r"图\s*[0-9一二三四五六七八九十]+", alt_text):
+            print(f"[error] image alt text contains figure numbering: {alt_text}")
             failed = True
         path_text = raw.split("#", 1)[0].strip()
         candidate = (report.parent / path_text).resolve()
@@ -125,24 +148,9 @@ def main() -> int:
         else:
             print(f"[ok] image exists: {raw}")
 
-    if len(IMAGE_RE.findall(text)) < 6:
-        print("[error] report should reference at least 6 figures")
-        failed = True
-
-    required_figures = [
-        "fig01_architecture_pipeline.png",
-        "fig02_openmp_speedup.png",
-        "fig03_openmp_efficiency.png",
-        "fig04_default_gap.png",
-        "fig05_tuning_curve.png",
-        "fig06_policy_comparison.png",
-        "fig07_cuda_positioning.png",
-        "fig08_paper_runtime_comparison.png",
-        "fig09_paper_quality_comparison.png",
-    ]
-    for fig_name in required_figures:
+    for fig_name in REQUIRED_FIGURES:
         if fig_name not in text:
-            print(f"[error] missing required final figure reference: {fig_name}")
+            print(f"[error] missing required figure reference: {fig_name}")
             failed = True
 
     for idx, line in enumerate(lines, start=1):

@@ -1,0 +1,24 @@
+instance,tier,source,status,path,dimension,edge_weight_type,sha256,message
+ch130,L1,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/ch130.tsp.gz,downloaded,data\ch130.tsp,130,EUC_2D,b9304715dff0085925598a51f36c24b7cf390cb991bd8262f061dd7497bd8742,ok
+ch150,L1,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/ch150.tsp.gz,downloaded,data\ch150.tsp,150,EUC_2D,05abd424f773269b13477d367e534797aac080fb536a28074a72a9c0ba8064f5,ok
+kroA150,L1,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/kroA150.tsp.gz,downloaded,data\kroA150.tsp,150,EUC_2D,acfeddc0cf4dd78ae69dd0c379b52b4031a4a8daa61a0cab3f46c1e3e2a616ba,ok
+d198,L1,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/d198.tsp.gz,downloaded,data\d198.tsp,198,EUC_2D,d4383f7a91eabb83f8b1be9b4b7bf98bf15f8c87851ad99e6aa6719046d414df,ok
+tsp225,L1,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/tsp225.tsp.gz,downloaded,data\tsp225.tsp,225,EUC_2D,3d356ab7c1a724cd1e05e0809cf2db11932c3bc8f54f6124e02c2b6c7f5fd901,ok
+pr226,L1,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/pr226.tsp.gz,downloaded,data\pr226.tsp,226,EUC_2D,06e9aa41740da7db7f5058ba4cfd0302e9fe95ebc7d769c6610407f162ba16b9,ok
+gil262,L1,https://raw.githubusercontent.com/mastqe/tsplib/master/gil262.tsp,downloaded,data\gil262.tsp,262,EUC_2D,662dac76952a676c709d250b124e689ce6b85782c7c595e8b9666217aaae9b65,ok
+a280,L1,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/a280.tsp.gz,downloaded,data\a280.tsp,280,EUC_2D,3fb489af4be6d04f2e84e73ec8302c32c65e6d344187b2347685fb311416e7bf,ok
+lin318,L2,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/lin318.tsp.gz,downloaded,data\lin318.tsp,318,EUC_2D,0de63cddb2a3ae9b10f3eaee4390ece107e2355445cdb5240db65a90eb1fe5fc,ok
+rd400,L2,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/rd400.tsp.gz,downloaded,data\rd400.tsp,400,EUC_2D,1f2543164d67d93eaea4537f3033a94fa8f14d105f3caf8a817abaddcd346693,ok
+pcb442,L2,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/pcb442.tsp.gz,downloaded,data\pcb442.tsp,442,EUC_2D,0f58bc2f1aa0023764ebc14b3b0dcb6e765ffe173963fdc1cb8443d969842b51,ok
+d493,L2,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/d493.tsp.gz,downloaded,data\d493.tsp,493,EUC_2D,a017d8773a1bb279356929a3dd196df11d3fae7b9d45cc5e92d3385616252820,ok
+att532,L2,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/att532.tsp.gz,downloaded,data\att532.tsp,532,ATT,ac1707613da7f07e65604dbfb52bdbcfe572747f01e776cc82d39659b52b18fc,ok
+u574,L2,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/u574.tsp.gz,downloaded,data\u574.tsp,574,EUC_2D,f6219abf1edc76e50e89126659257ba6d55d16551dcb25d6c6733b8566782ad3,ok
+rat575,L2,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/rat575.tsp.gz,downloaded,data\rat575.tsp,575,EUC_2D,7790177e38dba62ddd3823e4ac94aa677fb8b518a8e1e8a70bbe604529fd8619,ok
+d657,L2,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/d657.tsp.gz,downloaded,data\d657.tsp,657,EUC_2D,5941905966fea245352cecbf32476508e5da1a4177972ca7e18ea6e4564c4f18,ok
+u724,L2,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/u724.tsp.gz,downloaded,data\u724.tsp,724,EUC_2D,d13ca314d1c2cddebf473b4e049665ddd4c2814badf2be4b3ec15077dad6459f,ok
+rat783,L2,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/rat783.tsp.gz,downloaded,data\rat783.tsp,783,EUC_2D,b9535dc5e44549f613bf6e34ee8667eed6f7a13e6b74c0b0451de95a480cabde,ok
+pr1002,L3,,failed,data\pr1002.tsp,,,,HTTPError: HTTP Error 404: Not Found
+dsj1000,L3,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/dsj1000.tsp.gz,downloaded,data\dsj1000.tsp,1000,CEIL_2D,6fdad6e74c25ed4a4756a561ba941c1c8e7fd77c4a3d0903ed788ec2d4095f61,ok
+si1032,L3,,failed,data\si1032.tsp,,,,HTTPError: HTTP Error 404: Not Found
+u1060,L3,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/u1060.tsp.gz,downloaded,data\u1060.tsp,1060,EUC_2D,b650149d3662588d39be22024c04b68df2957c0c7ab2a351ef84b30e780505c0,ok
+vm1084,L3,https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/vm1084.tsp.gz,downloaded,data\vm1084.tsp,1084,EUC_2D,37bdb51ff01b47f7f76189ff366f9ee11ae56799860ca9cf53dbb2175376a34d,ok

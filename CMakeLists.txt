@@ -9,6 +9,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(TSP_ENABLE_OPENMP "Enable OpenMP parallel algorithms" ON)
 option(TSP_ENABLE_CUDA "Enable CUDA parallel algorithms" ON)
+# MPI + OpenMP hybrid backend is an optional engineering extension. It is ON by
+# default, but gracefully disabled when MPI is not installed, so it never affects
+# the default OpenMP/CUDA build.
+option(TSP_ENABLE_MPI "Enable MPI backend" ON)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
@@ -77,8 +81,22 @@ else()
     target_compile_options(tsp_core PRIVATE $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:Release>>:-O3 -march=native -DNDEBUG>)
 endif()
 
+set(TSP_EXTRA_LINK_LIBS "")
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9)
+    list(APPEND TSP_EXTRA_LINK_LIBS stdc++fs)
+endif()
+
+if(TSP_ENABLE_MPI)
+    find_package(MPI QUIET)
+    if(MPI_CXX_FOUND)
+        message(STATUS "MPI enabled")
+    else()
+        message(STATUS "TSP_ENABLE_MPI=ON but MPI was not found; hybrid backend disabled gracefully")
+    endif()
+endif()
+
 add_executable(tsp_sa src/main.cpp)
-target_link_libraries(tsp_sa PRIVATE tsp_core)
+target_link_libraries(tsp_sa PRIVATE tsp_core ${TSP_EXTRA_LINK_LIBS})
 
 if(TSP_ENABLE_OPENMP AND OpenMP_CXX_FOUND)
     target_link_libraries(tsp_sa PRIVATE OpenMP::OpenMP_CXX)
@@ -88,6 +106,25 @@ if(MSVC)
     target_compile_options(tsp_sa PRIVATE $<$<CONFIG:Release>:/O2 /DNDEBUG>)
 else()
     target_compile_options(tsp_sa PRIVATE $<$<CONFIG:Release>:-O3 -march=native -DNDEBUG>)
+endif()
+
+if(TSP_ENABLE_MPI AND MPI_CXX_FOUND)
+    add_executable(tsp_sa_mpi
+        src/mpi_main.cpp
+        src/mpi_parallel.cpp
+    )
+    target_link_libraries(tsp_sa_mpi PRIVATE tsp_core MPI::MPI_CXX ${TSP_EXTRA_LINK_LIBS})
+    target_compile_definitions(tsp_sa_mpi PRIVATE TSP_HAS_MPI=1)
+
+    if(TSP_ENABLE_OPENMP AND OpenMP_CXX_FOUND)
+        target_link_libraries(tsp_sa_mpi PRIVATE OpenMP::OpenMP_CXX)
+    endif()
+
+    if(MSVC)
+        target_compile_options(tsp_sa_mpi PRIVATE $<$<CONFIG:Release>:/O2 /DNDEBUG>)
+    else()
+        target_compile_options(tsp_sa_mpi PRIVATE $<$<CONFIG:Release>:-O3 -march=native -DNDEBUG>)
+    endif()
 endif()
 
 enable_testing()

@@ -1,0 +1,9 @@
+instance,dimension,cuda_mode,chains,block_size,candidates_per_iter,iterations,repeat,bks,best_length_min,gap_min,elapsed_ms_mean,speedup_candidate_vs_chain,speedup_vs_openmp,notes
+a280,280,candidate,64,128,128,500000,3,2579,2579,0.0000,1465.5780,0.4195,,batch proposal variant; slower than chain
+a280,280,chain,64,128,128,500000,3,2579,2741,6.2815,614.8020,1.0000,,
+ch130,130,candidate,64,128,128,500000,3,6110,6110,0.0000,1370.6010,0.3888,,batch proposal variant; slower than chain
+ch130,130,chain,64,128,128,500000,3,6110,6176,1.0802,532.9153,1.0000,,
+lin318,318,candidate,64,128,128,500000,3,42029,42217,0.4473,1437.9853,0.3811,,batch proposal variant; slower than chain
+lin318,318,chain,64,128,128,500000,3,42029,44433,5.7199,547.9943,1.0000,,
+rat575,575,candidate,64,128,128,500000,3,6773,6924,2.2294,1691.4853,0.4127,,batch proposal variant; slower than chain
+rat575,575,chain,64,128,128,500000,3,6773,8066,19.0905,697.9987,1.0000,,

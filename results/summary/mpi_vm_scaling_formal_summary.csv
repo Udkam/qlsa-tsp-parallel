@@ -1,0 +1,9 @@
+algorithm,instance,np,threads,chains,runs,elapsed_ms_mean,elapsed_ms_std,speedup_vs_np1,efficiency,communication_ms_mean,best_length_min,gap_percent
+qlsa-mpi-omp,berlin52,1,2,64,3,3863.947,1.456,1.0000,1.0000,0.008,7542,0.0000
+qlsa-mpi-omp,berlin52,1,4,64,3,3825.010,15.991,1.0000,1.0000,0.008,7542,0.0000
+qlsa-mpi-omp,berlin52,2,2,64,3,2276.523,181.761,1.6973,0.8487,5.727,7542,0.0000
+qlsa-mpi-omp,berlin52,2,4,64,3,2106.975,22.242,1.8154,0.9077,5.212,7542,0.0000
+sa-mpi-omp,berlin52,1,2,64,3,2604.738,31.789,1.0000,1.0000,0.013,7542,0.0000
+sa-mpi-omp,berlin52,1,4,64,3,2619.846,10.728,1.0000,1.0000,0.008,7542,0.0000
+sa-mpi-omp,berlin52,2,2,64,3,1312.730,9.032,1.9842,0.9921,4.924,7542,0.0000
+sa-mpi-omp,berlin52,2,4,64,3,1309.360,12.680,2.0009,1.0004,6.387,7542,0.0000

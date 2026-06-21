@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 #include <numeric>
+#include <random>
 #include <stdexcept>
 
 namespace tsp {
@@ -114,6 +115,49 @@ void apply_2opt(Tour& tour, int i, int k) {
         throw std::invalid_argument("invalid 2-opt move");
     }
     std::reverse(tour.begin() + i, tour.begin() + k + 1);
+}
+
+Tour double_bridge(const Tour& tour, Rng& rng) {
+    const int n = static_cast<int>(tour.size());
+    if (n < 8) {
+        // Too small for a clean double bridge: fall back to a single swap.
+        Tour out = tour;
+        if (n >= 2) {
+            std::uniform_int_distribution<int> dist(0, n - 1);
+            const int i = dist(rng.engine());
+            const int j = dist(rng.engine());
+            std::swap(out[static_cast<size_t>(i)], out[static_cast<size_t>(j)]);
+        }
+        return out;
+    }
+    // Choose 1 <= p1 < p2 < p3 < n, then reconnect as A + C + B + D.
+    std::uniform_int_distribution<int> d1(1, n - 3);
+    const int p1 = d1(rng.engine());
+    std::uniform_int_distribution<int> d2(p1 + 1, n - 2);
+    const int p2 = d2(rng.engine());
+    std::uniform_int_distribution<int> d3(p2 + 1, n - 1);
+    const int p3 = d3(rng.engine());
+
+    Tour out;
+    out.reserve(tour.size());
+    out.insert(out.end(), tour.begin(), tour.begin() + p1);
+    out.insert(out.end(), tour.begin() + p2, tour.begin() + p3);
+    out.insert(out.end(), tour.begin() + p1, tour.begin() + p2);
+    out.insert(out.end(), tour.begin() + p3, tour.end());
+    return out;
+}
+
+int hamming_distance(const Tour& a, const Tour& b) {
+    if (a.size() != b.size()) {
+        throw std::invalid_argument("hamming_distance requires equal-length tours");
+    }
+    int count = 0;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (a[i] != b[i]) {
+            ++count;
+        }
+    }
+    return count;
 }
 
 }  // namespace tsp

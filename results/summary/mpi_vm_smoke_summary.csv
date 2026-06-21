@@ -1,0 +1,5 @@
+algorithm,instance,chains,threads,mpi_ranks,runs,fallback_rows,best_length_min,elapsed_ms_mean,elapsed_ms_std,communication_ms_mean,accepted_moves_mean,improved_moves_mean
+qlsa-mpi-omp,berlin52,64,4,2,3,0,7542,7413.115,327.174,4.943,6533504.333,2999614.000
+qlsa-mpi-omp,square4,16,2,2,3,0,40,19.574,5.415,4.552,105537.333,12396.667
+sa-mpi-omp,berlin52,64,4,2,3,0,7542,4728.318,47.830,4.882,5940610.333,2906068.667
+sa-mpi-omp,square4,16,2,2,3,0,40,16.682,7.070,4.448,98435.000,11416.333

@@ -18,4 +18,12 @@ using Tour = std::vector<int>;
 [[nodiscard]] int delta_2opt(const Tour& tour, const DistanceMatrix& dm, int i, int k);
 void apply_2opt(Tour& tour, int i, int k);
 
+// Building blocks toward a paper-style (candidate-leader) QLSA variant.
+// double_bridge applies a 4-opt double-bridge perturbation and returns a new
+// legal permutation; hamming_distance gives the position-wise difference count
+// used by the paper's diversity-state definition. See
+// docs/dev/paper_lite_qlsa_design.md.
+[[nodiscard]] Tour double_bridge(const Tour& tour, Rng& rng);
+[[nodiscard]] int hamming_distance(const Tour& a, const Tour& b);
+
 }  // namespace tsp

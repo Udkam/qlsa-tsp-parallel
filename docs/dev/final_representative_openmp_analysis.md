@@ -5,7 +5,7 @@
 - 代表实例：berlin52, eil76, rat99, eil101, a280, rat575, rat783, dsj1000, u1060, vm1084
 - 代表实例维度范围：52 到 1084
 - 代表实例中达到 BKS 的算法-实例组合数：2
-- 图表：`figures/final/fig_course_11_representative_openmp.png`
+- 图表：`figures/fig_course_11_representative_openmp.png`
 
 ## 代表实例结果
 

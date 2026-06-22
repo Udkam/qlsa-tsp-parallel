@@ -47,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", default=str(ROOT / "results" / "raw" / "cuda_qlsa_candidate_raw.csv"))
     parser.add_argument("--output", default=str(ROOT / "results" / "summary" / "cuda_qlsa_candidate_summary.csv"))
     parser.add_argument("--markdown", default=str(ROOT / "docs" / "dev" / "cuda_qlsa_candidate_analysis.md"))
-    parser.add_argument("--figure", default=str(ROOT / "figures" / "final" / "fig21_cuda_qlsa_candidate.png"))
+    parser.add_argument("--figure", default=str(ROOT / "figures" / "fig21_cuda_qlsa_candidate.png"))
     return parser.parse_args()
 
 

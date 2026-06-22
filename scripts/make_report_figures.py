@@ -3,14 +3,14 @@
 """Generate final report figures from existing CSV data.
 
 The script never fabricates missing data. If an input CSV is unavailable, the
-corresponding figure is skipped and recorded in figures/final/MISSING_FIGURES.md.
+corresponding figure is skipped and recorded in figures/MISSING_FIGURES.md.
 
 Figure text is rendered in Chinese where possible; English is kept only for
 proper nouns, algorithm/library names and metric abbreviations (SA, QLSA,
 OpenMP, CUDA, TSPLIB95, BKS, Gap, Speedup, Efficiency, CSV, Parser, 2-opt,
 Softmax, epsilon-greedy, Serial, CPU, GPU, Paper, Python, C++20). A CJK font is
 auto-detected; if none is available the script still renders but records the
-problem in figures/final/MISSING_FONTS.md.
+problem in figures/MISSING_FONTS.md.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RESULTS_FINAL = ROOT / "results" / "final"
 RESULTS_SUMMARY = ROOT / "results" / "summary"
 RESULTS_REFERENCE = ROOT / "results" / "reference"
-FIGURES = ROOT / "figures" / "final"
+FIGURES = ROOT / "figures"
 
 INSTANCES = ["berlin52", "eil51", "st70", "eil76", "rat99", "eil101"]
 HARD_INSTANCES = ["eil76", "rat99", "eil101"]

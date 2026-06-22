@@ -34,7 +34,7 @@ import sb_qlsa_paper  # noqa: E402
 BINARY = ROOT / "build-cuda-ninja" / "tsp_sa.exe"
 RAW = ROOT / "results" / "raw" / "python_reference_raw.csv"
 SUMMARY = ROOT / "results" / "summary" / "python_reference_summary.csv"
-FIGURE = ROOT / "figures" / "final" / "fig11_python_cpp_reference.png"
+FIGURE = ROOT / "figures" / "fig11_python_cpp_reference.png"
 ANALYSIS = ROOT / "docs" / "dev" / "python_reference_comparison.md"
 
 INSTANCES = ["berlin52", "eil76", "rat99", "eil101"]

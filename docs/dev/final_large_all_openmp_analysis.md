@@ -1,7 +1,7 @@
 # 大规模 OpenMP 实验分析
 
 - 输入 raw CSV：`results\raw\final_large_all_openmp_raw.csv`
-- 输出图：`figures\final\fig16_large_openmp_gap_time.png`
+- 输出图：`figures\fig16_large_openmp_gap_time.png`
 
 | instance | tier | algorithm | best | min Gap | mean ms | moves/s |
 |---|---|---|---:|---:|---:|---:|

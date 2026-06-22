@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", default=str(ROOT / "results" / "raw" / "cuda_reversal_raw.csv"))
     parser.add_argument("--output", default=str(ROOT / "results" / "summary" / "cuda_reversal_summary.csv"))
     parser.add_argument("--markdown", default=str(ROOT / "docs" / "dev" / "cuda_reversal_analysis.md"))
-    parser.add_argument("--figure", default=str(ROOT / "figures" / "final" / "fig22_cuda_parallel_reversal.png"))
+    parser.add_argument("--figure", default=str(ROOT / "figures" / "fig22_cuda_parallel_reversal.png"))
     return parser.parse_args()
 
 

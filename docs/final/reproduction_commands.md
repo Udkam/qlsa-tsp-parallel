@@ -29,22 +29,22 @@ scripts\run_targeted_quality.bat
 .\build-cuda-ninja\tsp_sa.exe --qlsa --qlsa_variant paper --input tests\fixtures\square4.tsp --iterations 500 --seed 1 --init random --csv-only
 .\build-cuda-ninja\tsp_sa.exe --qlsa --qlsa_variant paper-sb --input data\berlin52.tsp --iterations 100000 --seed 1 --init nn --csv-only
 py scripts\run_qlsa_variant_experiments.py --instances berlin52 eil76 rat99 eil101 --iterations 300000 --repeat 3 --chains 32 --threads 8 --output results\raw\qlsa_variant_alignment_raw.csv
-py scripts\analyze_qlsa_variant_experiments.py --input results\raw\qlsa_variant_alignment_raw.csv --output results\summary\qlsa_variant_alignment_summary.csv --markdown docs\dev\qlsa_variant_alignment_analysis.md --figure figures\final\fig_qlsa_variant_alignment.png
+py scripts\analyze_qlsa_variant_experiments.py --input results\raw\qlsa_variant_alignment_raw.csv --output results\summary\qlsa_variant_alignment_summary.csv --markdown docs\dev\qlsa_variant_alignment_analysis.md --figure figures\fig_qlsa_variant_alignment.png
 ```
 
 ## CUDA candidate / QLSA candidate
 
 ```powershell
 py scripts\run_cuda_candidate_experiments.py --instances berlin52 eil101 ch130 a280 --algorithms sa qlsa --iterations 500000 --repeat 3 --chains 64 --block-sizes 128 --candidates-per-iter 128 --reversal-modes serial parallel --output results\raw\cuda_qlsa_candidate_raw.csv
-py scripts\analyze_cuda_qlsa_candidate.py --input results\raw\cuda_qlsa_candidate_raw.csv --output results\summary\cuda_qlsa_candidate_summary.csv --markdown docs\final\cuda_qlsa_candidate_analysis.md --figure figures\final\fig21_cuda_qlsa_candidate.png
-py scripts\analyze_cuda_reversal.py --input results\raw\cuda_qlsa_candidate_raw.csv --output results\summary\cuda_reversal_summary.csv --markdown docs\final\cuda_reversal_analysis.md --figure figures\final\fig22_cuda_parallel_reversal.png
+py scripts\analyze_cuda_qlsa_candidate.py --input results\raw\cuda_qlsa_candidate_raw.csv --output results\summary\cuda_qlsa_candidate_summary.csv --markdown docs\final\cuda_qlsa_candidate_analysis.md --figure figures\fig21_cuda_qlsa_candidate.png
+py scripts\analyze_cuda_reversal.py --input results\raw\cuda_qlsa_candidate_raw.csv --output results\summary\cuda_reversal_summary.csv --markdown docs\final\cuda_reversal_analysis.md --figure figures\fig22_cuda_parallel_reversal.png
 ```
 
 CUDA 候选策略 quick 对照：
 
 ```powershell
 py scripts\run_cuda_candidate_experiments.py --instances berlin52 a280 --algorithms sa qlsa --iterations 100000 --repeat 1 --chains 32 --block-sizes 128 --candidates-per-iter 128 --reversal-modes parallel --candidate-policies best random hybrid --output results\raw\cuda_candidate_hybrid_quick_raw.csv
-py scripts\analyze_cuda_candidate.py --input results\raw\cuda_candidate_hybrid_quick_raw.csv --output results\summary\cuda_candidate_hybrid_quick_summary.csv --markdown docs\dev\cuda_candidate_hybrid_quick_analysis.md --figure figures\final\fig_cuda_candidate_hybrid_quick.png
+py scripts\analyze_cuda_candidate.py --input results\raw\cuda_candidate_hybrid_quick_raw.csv --output results\summary\cuda_candidate_hybrid_quick_summary.csv --markdown docs\dev\cuda_candidate_hybrid_quick_analysis.md --figure figures\fig_cuda_candidate_hybrid_quick.png
 ```
 
 Nsight 检测入口：
@@ -79,7 +79,7 @@ python3.8 scripts/run_large_mpi_vm.py --instances ch130 a280 --np 1 2 --threads 
 Windows 侧分析：
 
 ```powershell
-py scripts\analyze_large_mpi_vm.py --input results\raw\large_mpi_vm_formal_aggressive_raw.csv --output results\summary\large_mpi_vm_formal_aggressive_summary.csv --markdown docs\final\large_mpi_vm_analysis.md --figure figures\final\fig18_large_mpi_vm_scaling.png
+py scripts\analyze_large_mpi_vm.py --input results\raw\large_mpi_vm_formal_aggressive_raw.csv --output results\summary\large_mpi_vm_formal_aggressive_summary.csv --markdown docs\final\large_mpi_vm_analysis.md --figure figures\fig18_large_mpi_vm_scaling.png
 ```
 
 ## 报告检查

@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", default=str(ROOT / "results" / "raw" / "large_openmp_raw.csv"))
     parser.add_argument("--output", default=str(ROOT / "results" / "summary" / "large_openmp_summary.csv"))
     parser.add_argument("--markdown", default=str(ROOT / "docs" / "dev" / "large_openmp_analysis.md"))
-    parser.add_argument("--figure", default=str(ROOT / "figures" / "final" / "fig16_large_openmp_gap_time.png"))
+    parser.add_argument("--figure", default=str(ROOT / "figures" / "fig16_large_openmp_gap_time.png"))
     return parser.parse_args()
 
 

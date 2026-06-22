@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "figures" / "final" / "fig14_hpc_hybrid_architecture.png"
+OUT = ROOT / "figures" / "fig14_hpc_hybrid_architecture.png"
 
 COLORS = {
     "mpi": "#2ca02c",

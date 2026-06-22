@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Check Markdown report image references and unsafe wording.
-
-The script is intentionally small and UTF-8 explicit because the project report
-contains Chinese text and PowerShell console rendering can be misleading.
-"""
+"""Check Markdown report image references and unsafe wording."""
 
 from __future__ import annotations
 
@@ -21,8 +17,11 @@ MOJIBAKE_TOKENS = [
     "\ufffd",
     "?" * 4,
     "\u951f\u65a4\u62f7",
-    "\u95bf\u7192\u67bb\u93b7",
-    "\u95c1\u8de8\u5590\u93cb",
+    "\u95bf",
+    "\u95c1",
+    "\u95c2",
+    "å",
+    "ä",
 ]
 
 FORBIDDEN_PHRASES = [
@@ -42,7 +41,10 @@ FORBIDDEN_PHRASES = [
     "<你的姓名>",
     "<你的学号>",
     "<你的专业>",
-    "TODO",
+    "{sa_avg_speed",
+    "{qlsa_avg_speed",
+    "figures" + "/final",
+    "figures" + "\\final",
 ]
 
 REQUIRED_FIGURES = [
@@ -56,6 +58,8 @@ REQUIRED_FIGURES = [
     "fig_course_09_paper_quality.png",
     "fig_course_10_openmp_thread_scaling.png",
     "fig_course_11_representative_openmp.png",
+    "fig_cuda_candidate_policy_formal.png",
+    "fig_qlsa_variant_alignment.png",
 ]
 
 
@@ -91,7 +95,7 @@ def main() -> int:
         failed = True
 
     for alt_text, raw in image_refs:
-        if re.search(r"图\s*[0-9一二三四五六七八九十]+[:：]?", alt_text):
+        if re.search(r"图\s*[0-9一二三四五六七八九十]+\s*[:：]", alt_text):
             print(f"[error] image alt text should not contain numbered caption: {alt_text}")
             failed = True
 

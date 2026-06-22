@@ -79,7 +79,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", default=str(ROOT / "results" / "raw" / "final_all_data_openmp_raw.csv"))
     parser.add_argument("--output", default=str(ROOT / "results" / "summary" / "final_representative_openmp_summary.csv"))
     parser.add_argument("--markdown", default=str(ROOT / "docs" / "dev" / "final_representative_openmp_analysis.md"))
-    parser.add_argument("--figure", default=str(ROOT / "figures" / "final" / "fig_course_11_representative_openmp.png"))
+    parser.add_argument("--figure", default=str(ROOT / "figures" / "fig_course_11_representative_openmp.png"))
     parser.add_argument(
         "--representatives",
         nargs="+",

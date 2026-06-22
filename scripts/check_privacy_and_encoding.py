@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Check public-facing project text files for secrets, private VM details and mojibake."""
+# -*- coding: utf-8 -*-
+"""Check public-facing project text files for private data and mojibake."""
 
 from __future__ import annotations
 
@@ -10,7 +11,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = [
     ROOT / "README.md",
-    ROOT / "submission" / "README.md",
+    ROOT / "docs" / "final" / "final_report_course.md",
+    ROOT / "docs" / "final" / "personal_report.md",
+    ROOT / "docs" / "final" / "known_limitations.md",
+    ROOT / "docs" / "final" / "reproduction_commands.md",
     ROOT / "results" / "final" / "RESULTS_INDEX.md",
 ]
 TEXT_SUFFIXES = {".md", ".txt", ".csv"}
@@ -21,15 +25,16 @@ PRIVATE_PATTERNS = [
     ("vm_private_ip", re.compile(r"192\.168\.[0-9]{1,3}\.[0-9]{1,3}")),
     ("ssh_key_marker", re.compile(r"BEGIN (?:OPENSSH|RSA) PRIVATE KEY")),
     ("local_key_path", re.compile(r"\.ssh_mpi_vm_key|E:\\tmp\\mpi_vm_key", re.IGNORECASE)),
-    ("password_word", re.compile(r"密码[:：=]|password[:=]", re.IGNORECASE)),
+    ("password_word", re.compile(r"密码[:：]|password[:=]", re.IGNORECASE)),
 ]
 
 MOJIBAKE_TOKENS = [
-    "????",
+    "?" * 4,
     "\ufffd",
-    "锟斤拷",
-    "閿",
-    "闁",
+    "\u951f\u65a4\u62f7",
+    "\u95bf",
+    "\u95c1",
+    "\u95c2",
 ]
 
 

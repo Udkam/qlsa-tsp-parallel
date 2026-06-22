@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", default=str(ROOT / "results" / "raw" / "large_cuda_raw.csv"))
     parser.add_argument("--output", default=str(ROOT / "results" / "summary" / "large_cuda_summary.csv"))
     parser.add_argument("--markdown", default=str(ROOT / "docs" / "dev" / "large_cuda_analysis.md"))
-    parser.add_argument("--figure", default=str(ROOT / "figures" / "final" / "fig17_large_cuda_chain_vs_candidate.png"))
+    parser.add_argument("--figure", default=str(ROOT / "figures" / "fig17_large_cuda_chain_vs_candidate.png"))
     parser.add_argument("--openmp-summary", default=str(ROOT / "results" / "summary" / "large_openmp_summary.csv"))
     return parser.parse_args()
 

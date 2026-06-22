@@ -79,7 +79,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--output", type=Path, default=ROOT / "results" / "raw" / "mpi_vm_scaling_raw.csv")
     parser.add_argument("--summary", type=Path, default=ROOT / "results" / "summary" / "mpi_vm_scaling_summary.csv")
-    parser.add_argument("--figure", type=Path, default=ROOT / "figures" / "final" / "fig12_mpi_vm_scaling.png")
+    parser.add_argument("--figure", type=Path, default=ROOT / "figures" / "fig12_mpi_vm_scaling.png")
     parser.add_argument("--quick", action="store_true")
     return parser.parse_args()
 

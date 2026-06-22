@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Check the single course submission package."""
+# -*- coding: utf-8 -*-
+"""Check the final course report package kept under docs/final."""
 
 from __future__ import annotations
 
@@ -9,26 +10,30 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 COURSE_REPORT = ROOT / "docs" / "final" / "final_report_course.md"
-COURSE_PACKAGE = ROOT / "submission" / "course"
+PERSONAL_REPORT = ROOT / "docs" / "final" / "personal_report.md"
 IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
-KEY_CSV = [
-    "final_key_results.csv",
-    "step5_multi_cpu_summary.csv",
-    "tuned_validation_summary.csv",
-    "targeted_quality_summary.csv",
-    "paper_table8_runtime.csv",
-    "paper_hard_instance_quality.csv",
-    "report_comparison_summary.csv",
-    "policy_comparison_summary.csv",
-    "openmp_scaling_final_summary.csv",
-    "cuda_qlsa_candidate_summary.csv",
-    "cuda_reversal_summary.csv",
-    "large_instance_inventory.csv",
-    "large_instance_download_status.csv",
-    "large_openmp_l1_summary.csv",
-    "large_cuda_formal_summary.csv",
-    "large_mpi_vm_formal_aggressive_summary.csv",
+REQUIRED_RESULTS = [
+    ROOT / "results" / "summary" / "step5_multi_cpu_summary.csv",
+    ROOT / "results" / "summary" / "targeted_quality_summary.csv",
+    ROOT / "results" / "summary" / "cuda_qlsa_candidate_summary.csv",
+    ROOT / "results" / "summary" / "mpi_vm_scaling_formal_summary.csv",
+    ROOT / "results" / "reference" / "paper_hard_instance_quality.csv",
+    ROOT / "results" / "final" / "RESULTS_INDEX.md",
+]
+
+FORBIDDEN = [
+    "TODO",
+    "<你的姓名>",
+    "<你的学号>",
+    "CUDA 全面优于 OpenMP",
+    "QLSA 总是优于 SA",
+    "完整复刻 SB-QLSA",
+    "百万城市级",
+    "figures" + "/final",
+    "figures" + "\\final",
+    "\u951f\u65a4\u62f7",
+    "\ufffd",
 ]
 
 
@@ -44,37 +49,39 @@ def check_images(report: Path) -> list[str]:
     return errors
 
 
+def check_text(path: Path) -> list[str]:
+    errors: list[str] = []
+    text = path.read_text(encoding="utf-8")
+    for phrase in FORBIDDEN:
+        if phrase in text:
+            errors.append(f"{path.relative_to(ROOT)}: forbidden phrase: {phrase}")
+    if "?" * 4 in text or "\u95bf" in text or "\u95c1" in text or "\u95c2" in text:
+        errors.append(f"{path.relative_to(ROOT)}: possible mojibake")
+    return errors
+
+
 def main() -> int:
     errors: list[str] = []
 
-    if not COURSE_REPORT.exists():
-        errors.append(f"missing report: {COURSE_REPORT.relative_to(ROOT)}")
-    else:
+    for report in [COURSE_REPORT, PERSONAL_REPORT]:
+        if not report.exists():
+            errors.append(f"missing document: {report.relative_to(ROOT)}")
+            continue
+        errors.extend(check_text(report))
+
+    if COURSE_REPORT.exists():
         errors.extend(check_images(COURSE_REPORT))
 
-    if not COURSE_PACKAGE.exists():
-        errors.append(f"missing package: {COURSE_PACKAGE.relative_to(ROOT)}")
-    else:
-        for rel in ["final_report.md", "reproduction_commands.md", "figures", "results_key"]:
-            if not (COURSE_PACKAGE / rel).exists():
-                errors.append(f"missing package item: {COURSE_PACKAGE.relative_to(ROOT)}/{rel}")
-        for csv_name in KEY_CSV:
-            if not (COURSE_PACKAGE / "results_key" / csv_name).exists():
-                errors.append(f"missing package key CSV: {COURSE_PACKAGE.relative_to(ROOT)}/results_key/{csv_name}")
-        package_report = COURSE_PACKAGE / "final_report.md"
-        if package_report.exists():
-            package_text = package_report.read_text(encoding="utf-8")
-            for _, raw in IMAGE_RE.findall(package_text):
-                candidate = (package_report.parent / raw.split("#", 1)[0].strip()).resolve()
-                if not candidate.exists():
-                    errors.append(f"{package_report.relative_to(ROOT)}: missing package image {raw}")
+    for path in REQUIRED_RESULTS:
+        if not path.exists():
+            errors.append(f"missing result file: {path.relative_to(ROOT)}")
 
     if errors:
         for error in errors:
             print(f"[error] {error}")
         return 1
 
-    print("[ok] course submission package check passed")
+    print("[ok] final course documents check passed")
     return 0
 
 

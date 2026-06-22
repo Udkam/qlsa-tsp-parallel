@@ -31,8 +31,8 @@ mpi_project_sync.tar.gz
 archive/local_cleanup/
 
 # Downloaded TSPLIB data
-# Keep downloaded datasets local by default. Key metadata and summaries are
-# stored under results/final, results/summary, and results/reference.
+# Keep datasets local by default. Key metadata and summaries are stored under
+# results/final, results/summary, and results/reference.
 data/*.tsp
 data/*.tsp.gz
 data/*.tmp
@@ -67,15 +67,9 @@ docs/dev/*payload*
 docs/dev/*login*
 docs/dev/*temporary*
 
-# Private course submission package.
-# It may contain name/student-id information. Keep it on disk for course
-# submission, but do not add it to a public repository by accident.
-submission/course/
-submission/final_submission/
-
 # Local assignment/source PDFs and private drafts
 PA-final-2026.pdf
-Q-learning旅行商问题.pdf
+Q-learning*.pdf
 选题报告.md
 选题报告.pdf
 *.tmp.pdf

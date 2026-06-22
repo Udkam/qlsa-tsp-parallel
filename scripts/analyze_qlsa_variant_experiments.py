@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", default=str(ROOT / "results" / "raw" / "qlsa_variant_alignment_raw.csv"))
     parser.add_argument("--output", default=str(ROOT / "results" / "summary" / "qlsa_variant_alignment_summary.csv"))
     parser.add_argument("--markdown", default=str(ROOT / "docs" / "dev" / "qlsa_variant_alignment_analysis.md"))
-    parser.add_argument("--figure", default=str(ROOT / "figures" / "final" / "fig_qlsa_variant_alignment.png"))
+    parser.add_argument("--figure", default=str(ROOT / "figures" / "fig_qlsa_variant_alignment.png"))
     return parser.parse_args()
 
 

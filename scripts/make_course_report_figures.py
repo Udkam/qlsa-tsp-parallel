@@ -17,7 +17,7 @@ from matplotlib import font_manager
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FIG_DIR = ROOT / "figures" / "final"
+FIG_DIR = ROOT / "figures"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 COLORS = {

@@ -49,7 +49,7 @@ CUDA candidate kernel 当前使用共享内存保存候选增量、候选下标�
 ```powershell
 py scripts\run_cuda_candidate_experiments.py --instances berlin52 a280 --algorithms sa qlsa --iterations 100000 --repeat 1 --chains 32 --block-sizes 128 --candidates-per-iter 128 --reversal-modes parallel --candidate-policies best random hybrid --output results\raw\cuda_candidate_hybrid_quick_raw.csv
 
-py scripts\analyze_cuda_candidate.py --input results\raw\cuda_candidate_hybrid_quick_raw.csv --output results\summary\cuda_candidate_hybrid_quick_summary.csv --markdown docs\dev\cuda_candidate_hybrid_quick_analysis.md --figure figures\final\fig_cuda_candidate_hybrid_quick.png
+py scripts\analyze_cuda_candidate.py --input results\raw\cuda_candidate_hybrid_quick_raw.csv --output results\summary\cuda_candidate_hybrid_quick_summary.csv --markdown docs\dev\cuda_candidate_hybrid_quick_analysis.md --figure figures\fig_cuda_candidate_hybrid_quick.png
 ```
 
 在 berlin52 上，多链模式和三种 candidate 策略均达到 BKS。a280 上，candidate-best 和 candidate-hybrid 明显降低偏差，但运行时间高于 chain 模式。该结果支持“候选批量评价改善搜索质量但增加 GPU 端同步与路径操作成本”的解释。

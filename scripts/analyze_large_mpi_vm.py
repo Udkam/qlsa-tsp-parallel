@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", default=str(ROOT / "results" / "raw" / "large_mpi_vm_raw.csv"))
     parser.add_argument("--output", default=str(ROOT / "results" / "summary" / "large_mpi_vm_summary.csv"))
     parser.add_argument("--markdown", default=str(ROOT / "docs" / "dev" / "large_mpi_vm_analysis.md"))
-    parser.add_argument("--figure", default=str(ROOT / "figures" / "final" / "fig18_large_mpi_vm_scaling.png"))
+    parser.add_argument("--figure", default=str(ROOT / "figures" / "fig18_large_mpi_vm_scaling.png"))
     return parser.parse_args()
 
 

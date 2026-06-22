@@ -28,6 +28,8 @@ scripts\run_targeted_quality.bat
 ```powershell
 .\build-cuda-ninja\tsp_sa.exe --qlsa --qlsa_variant paper --input tests\fixtures\square4.tsp --iterations 500 --seed 1 --init random --csv-only
 .\build-cuda-ninja\tsp_sa.exe --qlsa --qlsa_variant paper-sb --input data\berlin52.tsp --iterations 100000 --seed 1 --init nn --csv-only
+py scripts\run_qlsa_variant_experiments.py --instances berlin52 eil76 rat99 eil101 --iterations 300000 --repeat 3 --chains 32 --threads 8 --output results\raw\qlsa_variant_alignment_raw.csv
+py scripts\analyze_qlsa_variant_experiments.py --input results\raw\qlsa_variant_alignment_raw.csv --output results\summary\qlsa_variant_alignment_summary.csv --markdown docs\dev\qlsa_variant_alignment_analysis.md --figure figures\final\fig_qlsa_variant_alignment.png
 ```
 
 ## CUDA candidate / QLSA candidate
@@ -48,8 +50,10 @@ py scripts\analyze_cuda_candidate.py --input results\raw\cuda_candidate_hybrid_q
 Nsight 检测入口：
 
 ```powershell
-py scripts\run_cuda_nsight_profile.py --instance a280 --iterations 20000 --policy hybrid
+py scripts\run_cuda_nsight_profile.py --instance a280 --iterations 100000 --policy hybrid --ncu-set basic --markdown docs\dev\cuda_nsight_profile_deep_analysis.md
 ```
+
+如果 Nsight Systems 在中文项目路径下报路径编码错误，可将 `tsp_sa.exe` 与 `a280.tsp` 临时复制到 ASCII 路径后运行同一条 CUDA 命令；本报告使用该方式取得 Systems 记录。Nsight Compute 需要当前用户具备 NVIDIA GPU performance counters 权限。
 
 ## 大实例 OpenMP / CUDA
 

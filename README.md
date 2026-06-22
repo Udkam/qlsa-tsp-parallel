@@ -5,7 +5,7 @@
 ## 当前保留入口
 
 - 课程报告：`docs/final/final_report_course.md`
-- 课程报告 PDF：`docs/final/final_report_course.pdf`
+- 个人报告：`docs/final/personal_report.md`
 - 唯一提交包：`submission/course/`
 - 关键结果索引：`results/final/RESULTS_INDEX.md`
 - 复现命令：`docs/final/reproduction_commands.md`
@@ -89,9 +89,9 @@ QLSA CUDA candidate：
 - 调优与定向增强：`results/summary/tuned_validation_summary.csv`，`results/summary/targeted_quality_summary.csv`
 - CUDA QLSA candidate：`results/summary/cuda_qlsa_candidate_summary.csv`
 - CUDA parallel reversal：`results/summary/cuda_reversal_summary.csv`
+- QLSA 论文机制对齐变体：`results/summary/qlsa_variant_alignment_summary.csv`
 - 大实例 OpenMP：`results/summary/large_openmp_l1_summary.csv`
 - 大实例 CUDA：`results/summary/large_cuda_formal_summary.csv`
-- CUDA hybrid quick：`results/summary/cuda_candidate_hybrid_quick_summary.csv`
 - 双 VM MPI：`results/summary/mpi_vm_scaling_formal_summary.csv`，`results/summary/large_mpi_vm_formal_aggressive_summary.csv`
 - 论文参考数据：`results/reference/paper_table8_runtime.csv`，`results/reference/paper_hard_instance_quality.csv`
 
@@ -102,7 +102,7 @@ QLSA CUDA candidate：
 - CUDA candidate policy 中 `best` 更偏向批量择优，`random` 更接近随机候选提案，`hybrid` 用于观察两者折中；三者都不改变 OpenMP 是主性能结论的定位。
 - MPI + OpenMP 结果来自双 Ubuntu VM 和真实 `mpirun`，用于证明分布式工程链路，不等同生产 HPC benchmark。
 - QLSA 在部分实例上提升解质量，但不能表述为总是优于 SA。
-- C++ 已提供可选 `paper` / `paper-sb` 机制对齐变体；已有主实验仍主要使用 `current` 变体，不能把历史结果改写成 paper-sb 结论。
+- C++ 已提供可选 `paper` / `paper-sb` 机制对齐变体，并已完成代表实例对照；已有主实验仍主要使用 `current` 变体。
 
 ## 提交前检查
 

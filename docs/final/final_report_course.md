@@ -1,340 +1,611 @@
-# 面向旅行推销员问题的 Q-Learning 辅助模拟退火算法并行化实现与性能优化
+# TSP 多搜索链 SA/QLSA 并行优化
 
 ## 摘要
 
-旅行推销员问题是典型 NP-hard 组合优化问题，适合用模拟退火这类随机局部搜索方法求近似解，也适合通过多搜索链并行提高搜索覆盖率。本课题以 2026 年 Q-Learning-Assisted Simulated Annealing for Traveling Salesman Problem Optimization 论文为算法来源，将 SA/QLSA 思想迁移到 C++20 工程实现中，并扩展到 OpenMP、CUDA 和 MPI + OpenMP hybrid 后端。
+旅行推销员问题（TSP）是组合优化中的经典 NP-hard 问题。随着城市数量增加，可行路径数量快速增长，精确搜索难以在有限时间内完成。模拟退火（SA）通过温度下降和 Metropolis 接受准则，在局部改进与随机跳出之间取得平衡；参考论文进一步引入 Q-learning 辅助模拟退火（QLSA），尝试用学习机制改善邻域搜索策略。
 
-性能结论首先来自 OpenMP multi-chain。默认参数多实例实验表明，SA 在 6 个 TSPLIB95 实例上的平均 speedup 约为 5.46x，QLSA 平均 speedup 约为 4.98x；并行化不改变 SA/QLSA 的接受准则，因此性能提升与解质量评估口径保持一致。解质量方面，调优和定向增强实验显示 harder instances 可以明显改善：rat99 中 QLSA high-budget 达到 BKS=1211，而 SA high-budget 最好为 1212；eil101 中 SA/QLSA targeted 配置均达到 BKS。
+本项目以“多搜索链”为统一并行粒度。每条搜索链独立维护路径、随机数状态和搜索历史，距离矩阵只读共享，最终只需汇集各链的最优结果。这个粒度适合共享内存多线程，也可以映射到 CUDA 线程块和 MPI 进程。项目因此形成了一条清晰主线：先建立可靠的 SA/QLSA 串行搜索内核，再围绕多搜索链实现 OpenMP、CUDA、MPI + OpenMP 三类并行后端。
 
-工程扩展方面，CUDA 后端已完成真实编译、运行和结果归约，并进一步实现了 candidate-level 2-opt batch evaluation；该模式在 selected instances 上改善了解质量，但在当前小中规模实例上仍慢于 CUDA chain mode，且不作为 OpenMP 的性能替代结论，因此不作为主性能结论。MPI + OpenMP 后端已在两台 Ubuntu VM 上完成真实 `mpirun` smoke 和 formal scaling，说明 chain-level 搜索可以扩展到 distributed-memory 环境；该结论限定为 VMware NAT 环境下的工程证据，而不是生产 HPC 集群 benchmark。
+实验结果表明，OpenMP 是本项目最稳定的性能后端。默认参数下，SA 在 6 个 TSPLIB95 实例上的平均加速比为 5.46，平均并行效率为 68.28%；QLSA 的平均加速比为 4.98，平均并行效率为 62.29%。解质量方面，berlin52、eil51、st70 在默认参数下达到 BKS；eil76、rat99、eil101 通过后续调优验证和定向增强实验进一步改善了解质量。
 
-大实例压力测试补充了工程可扩展性证据。L1 的 8 个 130-280 城市实例已经完成 OpenMP formal，参数为 iterations=1,000,000、chains=64、threads=8、repeat=3；这说明项目已经跑通“百万迭代级”中等规模 TSPLIB95 实验。该表述不能扩大为“百万城市级实例已跑通”，因为本项目没有运行百万城市规模 TSP。
+QLSA 的质量收益主要体现在较难实例和较高搜索预算下。rat99 上 QLSA high-budget 达到 BKS=1211，而 SA high-budget 最好结果为 1212；eil101 的定向增强实验中 SA 和 QLSA 均达到 BKS=629。CUDA 后端实现了多链模式、候选批量评价和并行路径反转，候选批量评价在若干实例上改善了最短路径长度；MPI + OpenMP 已在双 Ubuntu 虚拟机上通过真实 `mpirun` 运行，berlin52 formal scaling 中 SA 的 np=2 接近 2 倍加速，QLSA 的 np=2 加速比约为 1.70 至 1.82，通信开销为毫秒级。
 
-## 1. 基本信息
+## 1 选题背景与目标
 
-| 项目 | 内容 |
-|---|---|
-| 课程名称 | 并行算法 |
-| 项目题目 | 面向旅行推销员问题的 Q-Learning 辅助模拟退火算法并行化实现与性能优化 |
-| 团队人数 | 1 人 |
-| 团队成员 | 陈乐浚 |
-| 学号 | 22361054 |
-| 学院/专业 | 中山大学计算机学院 / 信息与计算科学 |
+TSP 的输入是一组城市和任意两城市之间的距离，目标是寻找一条访问所有城市一次并回到起点的最短回路。该问题具有明确的数学定义、标准测试集和已知最优值，适合用来评价启发式搜索的解质量。对并行算法课程来说，TSP 还有一个重要特点：一次完整搜索可以从不同初始状态出发重复运行，多条搜索链之间依赖很少，天然适合并行化。
 
-## 2. 预期目标与实际完成情况
+选择 SA 是因为它能以较低实现复杂度体现随机局部搜索的核心思想。2-opt 邻域用于改变路径结构，Metropolis 准则允许在温度较高时接受较差解，从而降低陷入局部最优的风险。选择 QLSA 是因为参考论文将 Q-learning 引入 SA 的邻域选择过程，为“近期论文算法的工程化复现与并行扩展”提供了清晰切入点。
 
-表 1 对照选题阶段目标和最终完成内容。评价重点不是把某个循环简单并行化，而是把论文算法、C++ 工程、并行后端、自动实验和报告证据串成完整系统。
+本项目的预期目标可以概括为三点。第一，完成可运行的 SA/QLSA C++20 工程实现；第二，在多核 CPU、GPU 和分布式内存环境中验证多搜索链并行；第三，形成可复现的实验流程，给出加速比、并行效率和解质量分析。最终结果以 OpenMP 作为主性能结论，以 QLSA 的困难实例质量改善作为算法扩展结论，以 CUDA 和 MPI 作为更高工程复杂度的并行后端验证。
 
-| 模块 | 预期目标 | 实际完成 | 说明 |
-|---|---|---|---|
-| TSPLIB95 parser | 读取标准实例 | 完成 | 支持坐标型和显式矩阵型实例，覆盖 EUC_2D、CEIL_2D、GEO、ATT、EXPLICIT。 |
-| SA baseline | 串行模拟退火 | 完成 | 2-opt 邻域、Metropolis 准则、指数退火、O(1) delta。 |
-| QLSA | Q-learning 辅助 SA | 完成 | 支持状态/动作离散化、Q 表、epsilon-greedy、softmax。 |
-| SB-QLSA | 对齐论文状态思想 | 完成可选变体 | C++ 提供 `paper` / `paper-sb` 机制对齐入口；历史主实验仍主要使用 `current` 变体。 |
-| OpenMP | 多链并行 | 完成 | 主性能结论来源。 |
-| CUDA | GPU 工程扩展 | 完成 | chain mode、SA/QLSA candidate-level mode、并行路径反转和候选策略对照均可运行；不作为主加速结论。 |
-| MPI + OpenMP | 分布式内存扩展 | 完成 | 两台 Ubuntu VM 上真实 `mpirun` smoke 和 formal scaling。 |
-| 实验自动化 | 可复现实验 | 完成 | raw CSV、summary CSV、figures、analysis docs、submission 包。 |
+从课程要求看，本项目对应到三个方面：完成情况由 SA、QLSA、OpenMP、CUDA、MPI 和自动实验流程支撑；技术难度体现在 C++20 工程化、GPU 端候选批量评价、双虚拟机 MPI 运行和大实例压力测试；报告质量则通过加速比、并行效率、Gap、论文对比和局限性分析体现。
 
-表 2 给出课程评分点和支撑材料。
+## 2 参考论文与本项目定位
 
-| 课程评分点 | 支撑材料 | 证据位置 |
+参考论文 *Q-Learning-Assisted Simulated Annealing for Traveling Salesman Problem Optimization* 比较了 SA、QLSA 和带状态的 QLSA 变体。论文使用 TSPLIB95 实例，报告最优值、均值、标准差、相对最优偏差和运行时间。它的核心启发在于：模拟退火不必只依赖固定扰动策略，Q-learning 可以根据搜索反馈选择更合适的候选来源或邻域动作。
+
+论文中的方法可以分为三层。第一层是普通 SA：从当前路径出发，用 2-opt 产生邻域路径，再根据 Metropolis 准则决定是否接受。第二层是 QLSA：在 SA 框架上增加 Q-learning，用动作选择机制决定候选来源或扰动策略，例如当前解、历史最优解、随机解或 double-bridge 扰动解等。第三层是 State-Based QLSA：进一步引入状态信息，使 Q 表更新不仅依赖动作，也依赖搜索过程中的状态划分。论文通过这些变体比较学习机制对解质量和稳定性的影响。
+
+本项目吸收了论文中的三个关键思想。第一，保留 SA + 2-opt + Metropolis 的基本搜索框架；第二，在 QLSA 中维护 Q 表，并支持 epsilon-greedy 与 softmax 两类动作选择策略；第三，用状态和奖励描述搜索过程，使学习机制能够根据路径改善情况更新动作价值。基于这些思想，项目进一步加入 C++20 工程化实现、OpenMP 多链并行、CUDA 候选批量评价和 MPI + OpenMP 分布式运行，并补充了 `paper` 与 `paper-sb` 两个可选 QLSA 机制对齐变体。
+
+论文方法与本项目实现的对应关系如下：
+
+| 论文内容 | 本项目处理方式 | 报告中的定位 |
 |---|---|---|
-| 完成情况 | SA、QLSA、OpenMP、CUDA、MPI、parser、实验脚本均交付 | 源码、tests、results |
-| 技术难度 | C++20、O(1) 2-opt、CUDA candidate、MPI hybrid、自动分析流水线 | 第 4-6 节 |
-| 并行性能 | OpenMP 约 5x 加速，MPI formal scaling，效率分析 | 第 8 节 |
-| 近期论文对比 | 论文 Table 8/质量表、Python faithful baseline、机制差异说明 | 第 3、9 节 |
-| 报告质量 | 课程提交版报告、图表、证据等级、限制说明、复现命令 | docs/final、submission |
+| SA + 2-opt + Metropolis | 作为 C++20 串行内核实现，并用于 OpenMP/CUDA/MPI 后端 | 基础算法 |
+| QLSA 动作选择 | 默认变体实现状态/动作/Q 表更新，支持 epsilon-greedy 与 softmax | 算法扩展 |
+| Candidate-leader QLSA | 可选 `paper` 变体使用 current、global best、random、double-bridge 四类候选来源 | 机制对齐 |
+| State-Based QLSA | 可选 `paper-sb` 变体在 candidate-leader 上加入基于 Hamming 距离的 diversity state | 机制对齐 |
+| TSPLIB95 实验 | 使用相同问题族和 BKS 指标进行质量比较 | 参考对比 |
+| 并行实现 | 本项目扩展 OpenMP、CUDA、MPI + OpenMP | 课程工程重点 |
 
-## 3. 参考论文方法与实现差异
+默认参数、调优和定向增强实验主要使用 `current` 变体；`paper` / `paper-sb` 作为单独实验入口，用于检验 candidate-leader 与 diversity state 在同一 C++/OpenMP 框架下的效果。这样处理能保留已有实验的可比性，也能把论文机制对齐结果与默认工程变体区分开来。
 
-参考论文验证了 Q-learning 辅助模拟退火在 TSP 上的解质量提升潜力。论文方法可以拆成三层：classical SA 使用 2-opt 和 Metropolis 准则；QLSA 通过 Q-learning 在候选解或策略之间选择；SB-QLSA 进一步引入 diversity state，提高较难实例上的稳定性。该工程保留 SA/QLSA 的核心搜索思想，并提供 `current`、`paper`、`paper-sb` 三种 QLSA 入口，以区分历史工程化实验和论文机制对齐实验。
+论文结果与本项目结果可以在相同 TSPLIB95 实例和 BKS 指标下进行质量参考。运行时间对比需要单独说明：论文与本项目处于不同语言、不同硬件和不同实现环境中，因此时间数据不是同平台计时对照，只能作为工程实现差异的背景参考。
 
-| 论文机制 | 工程实现 | 是否完全对应 | 说明 |
+## 3 串行搜索内核设计
+
+### 3.1 问题建模与数据表示
+
+并行化之前，首先要把单条搜索链的行为定义清楚。TSP 的一个解可以看作城市编号的一个排列，例如 $(v_0,v_1,\ldots,v_{n-1})$，路径长度为相邻城市距离之和再加上回到起点的距离。由于可行解数量为 $(n-1)!/2$ 量级，直接枚举不可行，本项目采用启发式随机搜索：从一个初始路径出发，反复生成邻域解，用接受准则决定是否移动到新路径，并记录搜索过程中遇到的最短路径。
+
+距离矩阵使用一维连续数组保存，访问位置由城市编号映射得到。这样做的好处是结构简单、缓存友好，也便于复制到 GPU 全局内存。路径使用城市编号序列表示。2-opt 操作选取两条边 `a-b` 和 `c-d`，替换为 `a-c` 和 `b-d`，路径长度变化为：
+
+$$
+\Delta = d(a,c)+d(b,d)-d(a,b)-d(c,d)
+$$
+
+这个公式是串行搜索内核的关键优化。若每次扰动都重新计算完整路径长度，单次评价需要 $O(n)$；使用 2-opt 增量后，只需访问四条边，单次评价降为 $O(1)$。当迭代次数达到百万级、搜索链数量达到几十或上百时，这个优化直接决定实验是否能在合理时间内完成。
+
+### 3.2 SA 算法描述
+
+SA 的单链流程可以描述为以下步骤：
+
+1. 用最近邻或随机方式生成初始路径，计算当前路径长度。
+2. 按温度 $T$ 生成一个 2-opt 候选移动，利用增量公式得到 $\Delta$。
+3. 若 $\Delta<0$，说明路径变短，直接接受；否则按 Metropolis 准则以一定概率接受。
+4. 接受移动后更新当前路径；若当前路径优于历史最优路径，则更新该链的最优结果。
+5. 按冷却计划降低温度，重复上述过程直到达到迭代次数。
+
+模拟退火的接受概率为：
+
+$$
+P_{\mathrm{accept}}(\Delta,T)=
+\begin{cases}
+1, & \Delta < 0,\\
+\exp(-\Delta/T), & \Delta \ge 0.
+\end{cases}
+$$
+
+温度较高时，算法更容易接受较差解，搜索范围更广；温度下降后，接受较差解的概率降低，搜索逐渐集中于局部改进。这个过程使 SA 能在“探索”和“利用”之间取得平衡。
+
+### 3.3 QLSA 算法描述
+
+QLSA 在 SA 的基础上增加状态、动作和奖励。可以把它理解为：普通 SA 的邻域扰动策略基本固定，而 QLSA 让算法根据近期搜索反馈选择不同扰动方式。状态由近期路径变化离散化得到，动作表示不同邻域选择方式或扰动范围，奖励主要来自路径长度改善。动作选择支持 epsilon-greedy 和 softmax：前者保留一定概率随机探索，后者按 Q 值分布进行概率选择。Q 值更新为：
+
+$$
+Q(s,a) \leftarrow Q(s,a)+\alpha\left[r+\gamma\max_{a'}Q(s',a')-Q(s,a)\right]
+$$
+
+其中 $\alpha$ 为学习率，$\gamma$ 为折扣因子。QLSA 的额外代价来自动作选择和 Q 表更新，因此它通常比 SA 单链更慢；它的价值主要体现在合适参数和预算下改善搜索质量。
+
+### 3.4 算法分析
+
+从复杂度角度看，设城市数为 $n$，单链迭代次数为 $I$。距离矩阵预处理需要 $O(n^2)$ 时间和空间；路径本身需要 $O(n)$ 空间；使用 O(1) 增量后，SA 主循环评价移动的核心代价近似为 $O(I)$。QLSA 在此基础上增加状态计算、动作选择和 Q 表更新，渐进量级仍与迭代次数线性相关，但常数开销更高。
+
+这个复杂度特点直接影响并行化选择：一次 2-opt 增量评价只访问四条边，单次计算很轻；一条完整搜索链却包含大量迭代、完整随机数状态和独立最优路径。因此，把“搜索链”作为并行任务，比把单次 2-opt 移动拆给多个 CPU 线程更合适。后续 OpenMP、CUDA 和 MPI 后端都沿用这个任务粒度，只是在不同硬件上采用不同的数据放置和归约方式。
+
+## 4 多搜索链并行化方案
+
+本项目的并行化不是把某一行循环简单改成并行循环，而是先分析 SA/QLSA 的计算结构，再选择合适的任务粒度。一次 2-opt 候选评价只需要访问四条边，计算量很小；一条搜索链包含大量迭代、完整路径、随机数状态和局部最优记录，计算量更集中。因此，最自然的并行任务不是“单次移动”，而是“完整搜索链”。
+
+设总链数为 $C$，链编号集合为：
+
+$$
+\{0,1,\ldots,C-1\}
+$$
+
+每条链独立运行 SA 或 QLSA，结束后只提交本链的最短路径、路径长度和统计计数。全局最优路径通过一次归约得到。这个设计把大量计算留在链内部，把同步集中到链结束后，符合随机启发式搜索的计算特征。
+
+### 4.1 为什么选择链级并行
+
+链级并行的选择来自三个判断。
+
+**第一，单次 2-opt 评价太细。**  
+2-opt 增量评价只有四次距离访问和少量整数运算。如果在 CPU 上把每个候选移动拆给多个线程，线程调度、同步和任务提交开销很容易超过计算本身。细粒度并行更适合候选批量评价这类 GPU 场景，而不适合作为 OpenMP 主方案。
+
+**第二，搜索链之间天然独立。**  
+每条链有自己的当前路径、当前长度、随机数状态、历史最优路径和 Q 表。不同链从不同随机种子出发，搜索轨迹不同。它们不需要在每次迭代后交换状态，只有最终最优结果需要汇总。
+
+**第三，增加链数同时增加并行度和搜索覆盖。**  
+随机搜索的结果与初始路径和随机扰动有关。多条链并行运行不仅能减少墙钟时间，也能让算法同时探索不同局部区域。这一点与 TSP 的多峰搜索空间相匹配。
+
+链级并行的数据归属如下。
+
+| 数据或状态 | 归属方式 | 设计理由 |
+|---|---|---|
+| 距离矩阵 | 只读共享 | 所有链都查询距离，运行中不修改 |
+| 当前路径、当前长度 | 每条链私有 | 避免链间写冲突，保持搜索轨迹独立 |
+| 历史最优路径 | 每条链私有，结束后归约 | 不在内层循环中争用全局最优 |
+| 随机数状态 | 每条链私有 | 保证不同链可复现、可区分 |
+| Q 表与学习状态 | QLSA 每条链私有 | 不同链独立学习，避免并发写 Q 表 |
+| 接受次数、改进次数 | 每条链私有，结束后求和 | 统计信息不影响搜索过程 |
+
+这一划分决定了后续三个后端的共同结构：OpenMP 在同一进程内分配搜索链；MPI 在多个进程之间分配搜索链；CUDA 先保留一块一链的映射，再在块内部增加候选批量评价。
+
+从开销角度看，链级并行把总时间近似拆成三部分：
+
+$$
+T_{\mathrm{parallel}}\approx T_{\mathrm{search}}/p+T_{\mathrm{schedule}}+T_{\mathrm{reduce}}
+$$
+
+其中 $T_{\mathrm{search}}$ 是所有搜索链的主体计算，$T_{\mathrm{schedule}}$ 是线程或进程调度开销，$T_{\mathrm{reduce}}$ 是汇总最优路径和统计量的开销。多搜索链方案的设计目标就是让 $T_{\mathrm{search}}$ 占主要部分，并把 $T_{\mathrm{reduce}}$ 控制在链结束后的一次或少数几次操作中。
+
+如果改用移动级并行，时间结构会变成每次迭代都要分配候选、同步线程、选择移动并更新路径。对于百万次迭代，这类同步会进入最内层循环。相比之下，链级并行把同步次数从“迭代次数级别”降到“链数级别”，这是 OpenMP 和 MPI 实验能够得到稳定加速的主要原因。
+
+链级并行还保留了随机搜索的统计意义。每条链对应一次独立搜索试验，增加链数相当于增加独立尝试次数；并行执行只是把这些尝试同时运行，而不是改变每条链的接受准则。因此，OpenMP 默认实验中，串行多链和并行多链可以保持同样的搜索预算，这使得加速比和解质量能够分开讨论。
+
+### 4.2 OpenMP 多线程并行
+
+OpenMP 是本项目的主性能后端。它面向共享内存多核 CPU，适合直接复用只读距离矩阵和链私有状态。实现中，每个 `chain_id` 对应一个独立任务，线程按照静态调度领取链编号，计算完成后把结果写入 `chain_results[chain_id]`。
+
+OpenMP 后端的执行流程如下：
+
+```text
+并行区域:
+    对每个 chain_id:
+        seed = splitmix64(base_seed, chain_id)
+        构造链私有路径、随机数状态、统计量
+        运行 SA 或 QLSA 主循环
+        写入 chain_results[chain_id]
+
+并行区域结束:
+    顺序扫描 chain_results
+    选出最短路径
+    汇总 accepted_moves 和 improved_moves
+```
+
+这个方案把同步从“每次迭代”降到“每条链结束”。在 32 条链、每条链 1,000,000 次迭代的默认实验中，内层循环执行次数远大于链数。如果在内层频繁维护全局最优，会产生锁竞争；现在每条链只写自己的结果槽位，最终归约只扫描 32 个结果，开销很小。
+
+OpenMP 任务划分还带来一个实验上的好处：串行多链和 OpenMP 多链可以使用相同的链数、相同的随机种子派生方式和相同的接受准则。这样比较加速比时，主要变化来自执行方式，而不是搜索预算。
+
+实现中还需要处理两个细节。
+
+**随机种子派生。**  
+如果所有线程直接使用相邻种子，可能出现不同链随机序列相关性较高的问题。项目使用 `base_seed` 与 `chain_id` 派生每条链的随机种子，使同一实验可以复现，也使不同链的搜索轨迹尽量分散。
+
+**结果数组写入。**  
+每条链只写 `chain_results[chain_id]`，不存在两个线程写同一结果槽位的情况。全局最优路径不在并行区域内反复更新，而是在并行区域结束后顺序比较。这个处理牺牲了运行过程中查看全局最优的便利性，但换来了内层循环无锁执行。
+
+### 4.3 CUDA 多链与候选批量评价
+
+CUDA 后端分成两层。
+
+**第一层是多链模式。**  
+一个 CUDA 线程块对应一条搜索链，多个线程块并发运行多条链。该模式保留“链级并行”的基本思想，主要验证 GPU 可以承载多条独立搜索链。
+
+**第二层是候选批量评价模式。**  
+仍然保持一个线程块对应一条链，但块内多个线程同时生成和评价候选 2-opt 移动。这样做是为了让 GPU 线程参与更多实际计算，而不是只让一个线程执行整条链。
+
+候选批量评价的一次迭代包含以下步骤：
+
+1. 块内线程根据随机种子和线程编号生成候选 $(i,k)$。
+2. 每个线程使用 O(1) 增量公式计算候选 $\Delta$。
+3. 候选下标、增量和策略信息写入共享内存。
+4. 块内做候选选择：
+   - `best`：选取增量最小的候选；
+   - `random`：从候选批中可复现地随机选择；
+   - `hybrid`：在二者之间交替。
+5. 选中候选进入 Metropolis 接受判定。
+6. 若接受，块内线程协作完成路径反转。
+7. 若刷新最优路径，块内线程协作复制路径。
+
+这一路径体现了 GPU 端的工程优化：
+
+- **共享内存保存候选信息**，避免候选选择阶段反复访问全局内存。
+- **并行路径反转**，减少 thread 0 串行交换路径片段的时间。
+- **最优路径协作复制**，减少长路径实例中单线程复制开销。
+- **候选策略对照**，区分“批量评价带来的质量收益”和“批量择优改变提案分布”的影响。
+
+CUDA 的候选批量评价不是普通 SA 的完全等价加速。普通 SA 每次只生成一个候选；candidate-best 会在一批候选中选择更优者，因此搜索行为更偏向局部改进。报告中把它作为 GPU 搜索变体单独分析，而不是用它替代 OpenMP 主性能实验。
+
+CUDA 端的主要设计取舍集中在“让更多线程参与计算”和“保持路径操作正确”之间。候选评价本身很适合并行：每个候选只需要读取四个距离值并计算一个增量。但路径反转会修改同一条路径数组，必须保证交换顺序正确。因此项目先实现安全的串行反转，再加入块内并行反转和最优路径协作复制。这样做能逐步定位性能瓶颈，也能避免为了追求 GPU 线程利用率而破坏路径合法性。
+
+在内存布局上，距离矩阵放在设备全局内存中，所有线程块只读访问；路径数组按链分段存放，每个线程块只修改本链对应的路径片段；候选增量、候选下标和选择策略的中间数据放在共享内存中。这个布局避免了不同链之间写冲突，也让块内候选选择可以在较低延迟的共享内存中完成。
+
+### 4.4 MPI + OpenMP 分布式并行
+
+MPI + OpenMP 后端把链级并行扩展到分布式内存环境。外层由 MPI 进程划分搜索链，内层由 OpenMP 线程运行本地链。设总链数为 $C$、MPI 进程数为 $r$，第 $q$ 个进程负责一段连续链编号，约为 $C/r$ 条；若不能整除，前若干进程多承担一条。
+
+每个 MPI 进程内部仍采用 OpenMP 静态调度。进程结束本地搜索后，得到本地最短路径和统计计数；所有进程再共同完成全局汇总。
+
+流程如下：
+
+```text
+每个 MPI 进程:
+    计算本进程负责的 chain_id 区间
+    进程内用 OpenMP 并行运行这些链
+    得到 local best 和本地统计量
+
+所有 MPI 进程:
+    MPI_Allreduce 找到 global best 所在进程
+    MPI_Bcast 广播 global best tour
+    MPI_Reduce 汇总 accepted_moves 和 improved_moves
+```
+
+该通信模式的特点是低频、低数据量。搜索过程中，各进程不交换每一步路径，不共享 Q 表，也不同步温度状态；通信主要发生在结束阶段。若城市数为 $n$，广播最优路径只需要传输 $O(n)$ 个城市编号，而每个进程本地完成的是若干条链的百万级迭代。计算量随链数和迭代次数增长，通信量主要随城市数增长，这正是多链搜索适合 MPI 的原因。
+
+双虚拟机 MPI 实验不是生产集群评测，但它验证了完整分布式执行链路：Windows 主机之外的 Ubuntu VM 构建、Open MPI 启动、跨 VM 进程调度、本地 OpenMP 并行、最终路径归约和结果回收。
+
+MPI 后端的通信量可以直接估计。每个进程至少需要提交本地最短路径长度、所在进程编号、接受次数和改进次数；获得全局最优后，还要广播一条长度为 $n$ 的城市序列。因此一次汇总的数据量与城市数 $n$ 线性相关，而本地计算量与“本地链数 $\times$ 迭代次数”相关。对于本文的百万迭代实验，计算量远大于通信量，这也是通信时间保持在毫秒级的原因。
+
+在任务分配上，MPI 层采用连续链编号分段，而不是把每次迭代切成跨进程任务。这样做有两个好处：一是每个进程可以独立维护本地路径和 Q 表，不需要远程访问；二是 OpenMP 可以继续在进程内部使用相同的链级并行逻辑。MPI 承担“粗粒度分发”，OpenMP 承担“节点内并行”，两层职责清楚。
+
+### 4.5 三类后端的任务粒度比较
+
+三类后端的差异可以概括为下表。
+
+| 后端 | 任务划分 | 主要并行层次 | 同步位置 | 适合说明的问题 |
+|---|---|---|---|---|
+| OpenMP | 线程分配搜索链 | 单机共享内存 | 链结束后归约 | 主性能加速 |
+| CUDA 多链 | 线程块分配搜索链 | GPU 块级并行 | kernel 内局部同步 | GPU 多链可运行 |
+| CUDA 候选批量评价 | 块内线程评价候选 | GPU 线程级候选并行 | 候选选择、路径反转 | GPU 端质量探索 |
+| MPI + OpenMP | MPI 进程分配链，进程内 OpenMP | 分布式内存 + 多线程 | 结束阶段汇总 | 多节点扩展路径 |
+
+从代价角度看，OpenMP 的主要风险是线程负载不均衡；CUDA 的主要风险是路径反转、共享内存同步和全局内存访问；MPI 的主要风险是跨节点环境和进程负载不均衡。实验结果正好对应这些判断：OpenMP 给出最稳定的加速，CUDA candidate 在质量上有收益但时间更长，MPI 在双虚拟机上表现出低通信特征。
+
+这一节的设计结论是：链级并行承担主性能提升，CUDA 候选批量评价承担 GPU 端搜索增强，MPI + OpenMP 承担分布式结构验证。三者不是相互替代的关系，而是在同一 SA/QLSA 搜索内核上验证不同层次的并行能力。
+
+## 5 工程实现与实验流程
+
+工程实现围绕“同一搜索内核、多个并行后端、统一结果格式”展开。程序使用 C++20 编写，通过 CMake 构建；CUDA 使用 Ninja 构建路径；MPI 实验在 Ubuntu 虚拟机上使用 Open MPI。TSPLIB95 数据解析、距离矩阵、路径表示和 2-opt 增量属于公共基础模块，SA、QLSA、OpenMP、CUDA 和 MPI 后端都复用这些接口。
+
+主要运行环境如下。Windows 主机用于 C++、OpenMP 和 CUDA 实验，Ubuntu 虚拟机用于 MPI + OpenMP 双节点实验。不同后端使用同一套命令行参数和 CSV 输出格式，便于后续统一分析。
+
+| 项目 | 环境 |
+|---|---|
+| 操作系统 | Windows 主机；Ubuntu 虚拟机用于 MPI |
+| CPU | 12th Gen Intel(R) Core(TM) i5-12600KF |
+| GPU | NVIDIA GeForce RTX 4070 SUPER |
+| 编译器 | MSVC 19.44 / nvcc 12.9 |
+| 构建工具 | CMake + Ninja |
+| 构建模式 | Release |
+| 并行后端 | OpenMP、CUDA、MPI + OpenMP |
+
+为了让实验结论能够复查，程序输出采用统一字段记录一次运行的完整信息。每行结果都包含实例、维度、算法、并行后端、迭代次数、链数、线程数、随机种子、最短路径长度、运行时间、接受次数和改进次数。这样做的意义在于：同一个汇总值可以追溯到具体运行，而不是只在报告中保留一个最终数字。
+
+实验流程按“数据、构建、运行、汇总、检查”组织。
+
+- **数据阶段**：读取 TSPLIB95 文件头，确认实例名、维度、边权类型和 BKS，避免把错误文件或 HTML 下载页当作 `.tsp` 数据。
+- **构建阶段**：使用 Release 配置构建 C++20 程序，并分别确认 OpenMP、CUDA、MPI 后端是否启用。
+- **运行阶段**：每组实验固定参数矩阵、随机种子范围和重复次数，保存每次运行结果。
+- **汇总阶段**：按实例、算法和参数分组，计算最短路径、平均偏差、运行时间、加速比和并行效率。
+- **检查阶段**：检查图表路径、中文编码、隐私信息和报告中的错误表述，确保最终文档可以直接提交。
+
+这一流程的好处是减少手工整理误差。默认参数、调优、定向增强、CUDA、MPI 和大实例压力测试虽然参数不同，但都遵循相同的记录方式，因此可以在同一份报告中比较性能、质量和工程边界。
+
+性能优化不是只放在并行后端中完成。串行内核和数据表示已经为并行运行做了准备：
+
+- **距离矩阵连续存储**：二维距离压成一维数组，CPU 端减少指针跳转，CUDA 端也便于复制到设备内存。
+- **2-opt 增量计算**：每次候选评价只访问四条边，避免在百万次迭代中反复重算完整路径。
+- **链内状态私有化**：路径、随机数、计数器和 Q 表都由单条链独占，OpenMP 内层循环不需要锁。
+- **固定随机种子派生**：每条链由 `base_seed` 和 `chain_id` 派生种子，便于比较串行、多线程和 MPI 结果。
+- **CUDA 块内共享内存**：候选批量评价把候选增量和下标放入共享内存，减少候选选择阶段的全局内存访问。
+- **MPI 低频通信**：每个进程只在本地搜索结束后参与归约和广播，避免搜索过程中频繁跨节点同步。
+
+实现过程遵循由内到外的顺序。最内层先保证路径表示、距离访问和 2-opt 增量正确；随后建立单链 SA 和 QLSA；再把单链扩展为多搜索链；最后分别映射到 OpenMP、CUDA 和 MPI + OpenMP。这个顺序可以降低调试难度：如果并行结果异常，可以先回到单链和串行多链检查路径合法性、随机种子和接受准则。
+
+测试和检查也围绕这一顺序展开：
+
+- 小实例测试用于验证路径长度、2-opt 增量和路径合法性。
+- OpenMP 测试用于检查多链结果汇总是否正确。
+- CUDA 测试覆盖多链模式、候选批量评价、QLSA candidate 和非法参数边界。
+- QLSA paper-lite 测试用于确认 candidate-leader 入口可运行。
+- 报告检查用于保证图片存在、Markdown 结构正常、中文编码无乱码。
+
+因此，第 5 节强调的是工程可复现性：同一套搜索内核被多个后端复用，同一套输出格式被多个实验使用，同一套检查命令保证结果和报告不脱节。
+
+## 6 实验设计
+
+实验设计围绕三个问题展开。第一，链级并行是否能在不改变搜索逻辑的情况下带来稳定加速；第二，QLSA 的学习机制是否能在困难实例上改善解质量；第三，OpenMP、CUDA、MPI 三类后端在工程上各自适合承担什么角色。为了避免把单次最优结果写成算法规律，实验按“默认参数、调优验证、定向增强、后端扩展、压力测试”逐层推进。
+
+各实验组的作用如下。这个设计不是把所有后端放在一起比较谁最快，而是让每组实验回答一个明确问题。
+
+| 实验组 | 主要后端 | 主要实例 | 回答的问题 |
 |---|---|---|---|
-| SA + 2-opt | C++20 SA + O(1) delta | 是 | 接受准则与温度下降一致。 |
-| QLSA policy | C++ QLSA 支持 epsilon-greedy/softmax | 是 | 默认 `current` 变体使用工程化状态/动作离散。 |
-| candidate-leader | C++ `paper` 变体实现 current/global best/random/double-bridge 四类候选来源 | 是 | 需单独实验，不替代历史主实验。 |
-| SB-QLSA diversity state | C++ `paper-sb` 变体加入 Hamming diversity state | 是 | 与论文思想对齐，具体状态划分为本项目实现口径。 |
-| Python 串行实验 | C++/OpenMP/CUDA/MPI 多后端 | 不同 | 该工程重点是并行化和系统实现。 |
+| 默认参数多实例 | 串行多链、OpenMP | berlin52、eil51、st70、eil76、rat99、eil101 | 链级 OpenMP 是否稳定加速 |
+| 调优与定向增强 | OpenMP | eil76、rat99、eil101 | 困难实例在更高预算下能否接近 BKS |
+| QLSA 策略对比 | OpenMP | eil76、rat99、eil101 | epsilon-greedy 与 softmax 对当前实现的影响 |
+| 论文机制对齐 | OpenMP | berlin52、eil76、rat99、eil101 | `paper` / `paper-sb` 入口是否带来不同搜索行为 |
+| CUDA 后端 | CUDA | ch130、a280、lin318、rat575 | 候选批量评价是否改善质量，代价是什么 |
+| MPI + OpenMP | MPI + OpenMP | berlin52、ch130、a280 | 双虚拟机分布式链级划分是否可运行 |
+| 大实例压力测试 | OpenMP | a280、rat575、rat783、dsj1000、u1060、vm1084 等 | 工程能否覆盖更大规模实例 |
 
-与论文的时间对比必须谨慎。论文运行在 Python + Xeon 平台，该工程运行在 Windows + C++20 + OpenMP/CUDA/MPI 环境；不同硬件、不同语言、不同实现导致绝对时间不能作为同硬件同语言下的严格基准。可成立的结论是：同一类搜索思想在 C++ multi-chain 实现中形成了可稳定并行加速的负载。
+为让每组实验有明确作用，实例按规模和难度分为四类：
 
-## 4. 方案设计
+- **小规模基准实例**：berlin52、eil51、st70。它们规模适中、BKS 明确，适合检查实现正确性和默认参数下的稳定性。
+- **默认困难实例**：eil76、rat99、eil101。这些实例城市数并不大，但默认参数下会出现非零 Gap，适合观察参数、链数和学习策略对解质量的影响。
+- **中大规模实例**：a280、rat575、rat783。它们的城市数量明显增加，距离矩阵和搜索空间更大，适合观察同一预算下的运行时间和质量变化。
+- **千点级压力实例**：dsj1000、u1060、vm1084。它们用于检查数据解析、距离矩阵、OpenMP 搜索和结果流水线能否处理一千个城市左右的 TSPLIB95 数据。
 
-方案设计围绕一个核心约束展开：TSP 局部搜索需要频繁查询距离和计算 2-opt delta，因此数据结构必须服务于内层循环。C++20 用于控制内存布局和降低运行时开销；TSPLIB95 用作标准输入；CLI 和 CSV pipeline 用于保证实验可复现。
+代表实例的选择可以进一步概括为：
 
-![System architecture and data flow](../../figures/final/fig01_architecture_pipeline.png)
+| 类型 | 代表实例 | 特征 |
+|---|---|---|
+| 正确性与默认性能 | berlin52、eil51、st70 | BKS 明确，默认参数可达到最优，适合检查实现稳定性 |
+| 困难质量分析 | eil76、rat99、eil101 | 城市数不大，但默认参数仍有偏差，适合观察调参和 QLSA 作用 |
+| 中等规模压力 | a280、rat575、rat783 | 搜索空间扩大，适合观察运行时间和 Gap 随规模变化 |
+| 千点级压力 | dsj1000、u1060、vm1084 | 验证距离矩阵、路径操作和结果流水线的规模承受能力 |
 
-图 1：系统总体架构与数据流。
+默认参数实验用于回答性能问题。该组实验选取 berlin52、eil51、st70、eil76、rat99、eil101 六个 TSPLIB95 实例，统一使用 1,000,000 次迭代、32 条搜索链、最近邻初始化和 3 次重复运行。串行多链作为基准，OpenMP 使用 8 个线程。这样设置的理由是：六个实例既包含容易达到 BKS 的小实例，也包含默认参数下仍有偏差的困难实例；串行多链和 OpenMP 多链使用相同的搜索链数量，因此加速比主要反映并行调度收益，而不是搜索预算变化。
 
-DistanceMatrix 采用一维连续数组存储 `n*n` 距离，避免 `vector<vector<int>>` 带来的额外间接寻址，也便于 CUDA 后端直接复制到 GPU。Tour 使用城市排列表示，并提供 identity、random、nearest-neighbor 初始化和合法性检查。2-opt move 不重新计算整条路径，而只替换两条旧边和两条新边：
+解质量实验采用分层设计：
 
-$$
-\Delta = d(a,c) + d(b,d) - d(a,b) - d(c,d)
-$$
+- 第一层是独立调优验证：使用调参阶段选出的参数，但更换随机种子，检验这些参数在新运行中的稳定性。
+- 第二层是定向增强：在较优参数基础上增加搜索链数或迭代次数，观察困难实例在更大搜索预算下的质量上限。
 
-这一设计把 move 评价从 O(n) 降到 O(1)，是后续 OpenMP、CUDA 和 MPI 多链扩展的基础。
+策略对比实验只面向 QLSA。实验比较 epsilon-greedy 与 softmax 两种动作选择策略，实例集中在 eil76、rat99、eil101。该组实验的作用是检查本项目 QLSA 实现中动作选择策略的敏感性，并为后续 rat99 定向增强选择参数提供依据。参考论文中的 softmax 结果在第 8 节作为论文口径讨论；本节只解释当前 C++ 实现下的策略差异。
 
-## 5. 并行方案设计
+CUDA 实验分为多链模式和候选批量评价模式。多链模式保持“一条 GPU 线程块对应一条搜索链”的基本结构；候选批量评价模式在一个线程块内同时计算多个 2-opt 候选，并通过块内归约选择候选移动。这样设计是为了提高 GPU 端计算密度，并观察批量候选评价对解质量和运行时间的共同影响。
 
-SA/QLSA 的天然并行机会来自多搜索链：每条 chain 有独立随机种子、当前解、best tour 和 Q table，DistanceMatrix 只读共享，最终只需归约全局最优解。相比 move-level 并行，chain-level 并行通信少、同步少、实现风险低，更适合课程工程和可复现实验。
+MPI + OpenMP 实验用于验证分布式内存环境下的多链划分方式。两台 Ubuntu 虚拟机通过 `mpirun` 启动多个 MPI 进程，每个进程负责若干搜索链，进程内部再使用 OpenMP。np=1 作为单虚拟机基准，np=2 表示两台虚拟机共同执行。该组实验的目标是验证 MPI 进程级任务划分、局部最优汇集和通信开销。
 
-![Hybrid MPI OpenMP CUDA architecture](../../figures/final/fig14_hpc_hybrid_architecture.png)
+大实例压力测试用于检查工程可扩展性。该组实验覆盖 `data/` 目录中 38 个可用 TSPLIB95 实例，统一使用 OpenMP、1,000,000 次迭代、64 条搜索链、8 个线程和 3 次重复运行。正文不展开 38 个实例，而是按规模和难度选取 10 个代表实例：berlin52、eil76、rat99、eil101、a280、rat575、rat783、dsj1000、u1060、vm1084。这样既能覆盖默认小实例、困难实例、中等规模实例和千点级实例，又避免把报告写成过长的结果清单。
 
-图 2：MPI + OpenMP + CUDA 三层 HPC 架构。
-
-OpenMP 后端使用 chain-level `parallel for`，每个线程处理一组搜索链，结果写入独立 `chain_results`，并行区结束后串行归约。CUDA 后端保留 multi-chain 路径，同时新增 candidate-level mode：一个 block 对应一条 chain，block 内多个线程并行评价候选 2-opt move，并通过 shared memory reduction 选择候选。MPI 后端进一步把 chain range 切分到不同 rank，rank 内继续使用 OpenMP，rank 间通过 MPI reduction/gather 汇总全局最优和统计量。
-
-## 6. 实施过程与解决的问题
-
-| 问题 | 现象 | 解决方案 | 对结果影响 |
-|---|---|---|---|
-| TSPLIB 下载不稳定 | WSL/代理下官方源不可用 | 支持多镜像下载、手动放置和 SHA256 记录 | 数据准备可追溯。 |
-| CUDA toolset | Visual Studio 生成器启用 CUDA 失败 | 改用 Ninja + nvcc | CUDA kernel 能真实编译。 |
-| Python alias | Windows Store alias 干扰 `python` | 使用 `py` 启动器 | 自动脚本稳定。 |
-| QLSA 参数不稳定 | 默认参数 hard instances Gap 较大 | 调优、独立验证、定向增强 | 解质量提升但保留默认结果。 |
-| MPI remote launch | VM 间 Open MPI 路径/PMIx 不一致 | 统一 Open MPI 4.1.2 prefix | 双 VM `mpirun` 跑通。 |
-| 报告隐私与编码 | 课程提交材料包含个人信息 | 固定课程提交版入口，加入 mojibake 检查 | 提交材料更安全。 |
-| GPT 外部评审 | Chrome 页面停留在登录页 | 保留可粘贴资料包和阻塞记录 | 不伪造 GPT 反馈。 |
-
-## 7. 实验设计
-
-实验体系不是单次跑分，而是围绕不同问题设置的证据链：baseline 用于得到串行多链和默认 OpenMP 对比；scaling 用于分析线程/链数量变化；tuning 用于降低 harder instances 的 Gap；targeted enhancement 用于验证高预算质量；policy comparison 用于比较 epsilon-greedy 与 softmax；paper compare 用于与参考论文和 Python faithful baseline 建立对照；large-instance stress 用于验证工程可扩展性。
-
-核心指标如下：
+相对最优偏差定义为：
 
 $$
-Gap = \frac{best\_length - BKS}{BKS} \times 100\%
+\mathrm{Gap}=\frac{L_{\mathrm{best}}-L_{\mathrm{BKS}}}{L_{\mathrm{BKS}}}\times 100\%
 $$
 
+其中 $L_{\mathrm{best}}$ 为实验得到的最短路径长度，$L_{\mathrm{BKS}}$ 为 TSPLIB95 已知最优或最佳已知值。该指标用于把不同规模实例的解质量放在同一百分比尺度下比较。
+
+加速比和并行效率定义为：
+
 $$
-Speedup = \frac{T_{serial}}{T_{parallel}}, \quad
-Efficiency = \frac{Speedup}{p} \times 100\%
+S_p=\frac{T_1}{T_p}, \qquad
+E_p=\frac{S_p}{p}\times 100\%
 $$
 
-默认 OpenMP 实验使用 berlin52、eil51、st70、eil76、rat99、eil101，iterations=1,000,000，chains=32，repeat=3，threads=8，init=nearest-neighbor。QLSA 默认参数为 alpha=0.1、gamma=0.9、epsilon=0.1、policy=epsilon-greedy。
+其中 $T_1$ 表示串行或单进程基准时间，$T_p$ 表示使用 $p$ 个并行执行单元后的时间。OpenMP 默认实验中 $p=8$；MPI 实验中 np=1 作为单虚拟机 MPI 基准，np=2 表示两台虚拟机共同运行。所有结果均保留原始结果表和汇总结果表，正文只引用能支撑结论的关键数据。
 
-## 8. 实验结果与分析
+## 7 实验结果与分析
 
-### 8.1 OpenMP 性能
+本节先给出整体结果，再分别分析 OpenMP、解质量、CUDA、MPI 和大实例压力测试。实验结论可以概括为：OpenMP 提供主要运行时间收益；QLSA 在部分困难实例和高预算设置下改善解质量；CUDA 候选批量评价改善若干实例的路径质量但带来额外时间成本；MPI + OpenMP 验证了跨虚拟机的分布式链级划分。
 
-![OpenMP speedup across TSPLIB95 instances](../../figures/final/fig02_openmp_speedup.png)
+| 方向 | 已取得的结果 | 对报告结论的作用 |
+|---|---|---|
+| OpenMP 多链并行 | SA 平均加速比 5.46，QLSA 平均加速比 4.98 | 作为主要性能结果 |
+| 困难实例定向增强 | rat99 QLSA 达到 BKS=1211；eil101 SA/QLSA 均达到 BKS=629 | 支撑 QLSA 在部分实例上的质量收益 |
+| QLSA 机制对齐 | paper-sb 在 eil76 达到 BKS，eil101 最小偏差 0.477% | 展示参考论文机制在 C++ 框架中的进一步对齐 |
+| CUDA 候选批量评价 | ch130、a280 达到 BKS；lin318、rat575 偏差明显下降 | 展示 GPU 端候选评价的工程价值 |
+| MPI + OpenMP | berlin52 双虚拟机 np=2 下 SA 接近 2 倍加速 | 展示分布式内存任务划分可运行 |
+| 大实例压力测试 | 覆盖 38 个可用 TSPLIB95 实例，代表实例包含 vm1084 | 展示工程可扩展性 |
 
-图 3：默认参数下 OpenMP 多实例 speedup。
+### 7.1 OpenMP 多链并行结果
 
-![OpenMP parallel efficiency across TSPLIB95 instances](../../figures/final/fig03_openmp_efficiency.png)
+默认参数实验给出的最主要结论是：OpenMP 多链并行是本项目最稳定的性能来源。六个 TSPLIB95 实例上，SA 的平均加速比为 5.46，平均并行效率为 68.28%；QLSA 的平均加速比为 4.98，平均并行效率为 62.29%。这些数值来自相同搜索链数量下的串行多链与 8 线程 OpenMP 对比，因此可以较直接地反映链级并行带来的运行时间收益。
 
-图 4：默认参数下 OpenMP 并行效率。
+如下图，SA 在六个实例上的加速比介于 5.02 到 5.78 之间，波动较小；QLSA 在 berlin52、eil51、eil101 上也能达到约 5.4 至 5.6，但在 st70 和 rat99 上降到约 4.2。这个差异说明，链级并行本身稳定，但 QLSA 单链内部的动作选择、Q 表更新和搜索路径差异会增加负载波动。
 
-| family | average speedup | average efficiency | 主结论 |
+![OpenMP 多链并行加速比](../../figures/final/fig_course_01_openmp_speedup.png)
+
+从并行效率看，SA 的平均并行效率为 68.28%，rat99 和 eil101 分别达到 72.20% 和 71.52%；QLSA 的平均并行效率为 62.29%，其中 st70 和 rat99 约为 52.6%。这一结果与算法结构一致：SA 的链间任务更均匀，而 QLSA 每条链还要维护动作选择和学习更新，导致同样 8 个线程下有效负载更不均衡。
+
+![OpenMP 多链并行效率](../../figures/final/fig_course_02_openmp_efficiency.png)
+
+从任务划分角度看，OpenMP 获得较高加速比的原因并不只是“使用了 8 个线程”。程序把 32 条链拆成 32 个独立任务，线程只在本链内读写路径和统计量；距离矩阵是只读共享数据，多个线程同时访问不会产生写冲突；全局最优路径只在所有链完成后顺序归约。因此，百万次迭代中的绝大部分时间都用于实际搜索，而不是锁、条件变量或线程间通信。
+
+QLSA 的效率略低，也能从同一任务模型解释。QLSA 的每条链仍然独立，但链内多了状态判断、动作选择和 Q 表更新，不同链的动作序列更容易分化。静态调度下，如果某些链耗时更长，线程结束时间会更分散，并行区域末尾就会出现等待。这不是 OpenMP 后端失效，而是学习辅助搜索本身增加了链间运行时间差异。
+
+默认实验的平均结果可以概括如下。
+
+| 算法 | 平均加速比 | 平均并行效率 | 运行时间特征 |
 |---|---:|---:|---|
-| SA | 5.46x | 68.28% | 稳定加速，是主性能证据。 |
-| QLSA | 4.98x | 62.29% | 仍稳定加速，但 Q table 和动作选择增加常数开销。 |
+| SA | 5.46 | 68.28% | 链间任务更均匀，调度开销较低 |
+| QLSA | 4.98 | 62.29% | 学习更新增加单链开销和负载差异 |
 
-结果表明，chain-level OpenMP 是当前最可靠的性能提升路径。效率低于 100% 的主要原因是线程调度、随机搜索链运行差异、内存层次开销和 QLSA 额外学习逻辑。
+进一步观察线程扩展曲线，线程数从 1 增加到 16 时，加速比继续上升，但相对理想线逐渐拉开。berlin52 和 eil101 的 SA/QLSA 曲线都呈现这种趋势：低线程数阶段主要受益于并行搜索链增加；高线程数阶段开始受线程调度、内存访问和链间运行时间差异影响。
 
-### 8.2 默认参数解质量
+![OpenMP 线程扩展曲线](../../figures/final/fig_course_10_openmp_thread_scaling.png)
 
-![Default parameter gap comparison](../../figures/final/fig04_default_gap.png)
+### 7.2 默认参数下的解质量 
 
-图 5：默认参数下 SA/QLSA 的 Gap 对比。
+默认参数实验同时记录最短路径长度和相对最优偏差。结果显示，berlin52、eil51、st70 在 SA 和 QLSA 下均达到 BKS；eil76、rat99、eil101 仍有非零偏差。SA 在 eil76、rat99、eil101 上的偏差分别为 0.186%、0.330%、0.954%；QLSA 在这三个实例上的偏差分别为 0.743%、1.156%、1.272%。这说明默认 QLSA 参数并没有自然带来更好的解质量。
 
-默认参数中 berlin52、eil51、st70 可达到 BKS，但 eil76、rat99、eil101 仍有 Gap。这说明并行加速不等价于自动提升解质量；对 harder instances，需要独立调参和更高搜索预算。
+如下图，前三个实例的偏差为 0，后三个实例开始拉开差距。rat99 和 eil101 是后续调优和增强实验的重点，因为它们既不太小，也没有大到实验成本失控，适合观察搜索预算和 QLSA 参数对解质量的影响。
 
-### 8.3 调优与定向增强
+![默认参数下相对最优偏差](../../figures/final/fig_course_03_default_gap.png)
 
-![Tuning and targeted quality improvement](../../figures/final/fig05_tuning_curve.png)
+这组结果说明，并行性能和解质量需要分开讨论。OpenMP 改善的是同一搜索预算下的运行时间，它不会自动改变每条链的搜索能力。默认参数下 QLSA 在部分困难实例上的偏差较大，说明 Q 表更新需要与状态、动作、温度范围和迭代预算配合使用；学习机制本身不是无需调参的自动改进器。
 
-图 6：调优与定向增强前后的 Gap 改善。
+### 7.3 调优与定向增强结果
 
-| instance | family | configuration | best | min Gap | mean Gap |
+定向增强实验显示，增加搜索预算后，困难实例的解质量可以继续改善。最新复核中，eil101 的 SA 在 2,000,000 次迭代、128 条链配置下达到 BKS=629，平均偏差为 0.477%；QLSA 在 1,000,000 次迭代、64 条链配置下达到 BKS=629，2,000,000 次迭代、128 条链配置下平均偏差降至 0.223%。这些结果表明，eil101 在更充分的搜索覆盖下可以稳定接近 BKS。
+
+rat99 的结果更能体现 QLSA 的质量价值。高预算下，SA 最好路径长度为 1212，距离 BKS=1211 仍差 1；QLSA 在 3,000,000 次迭代配置下达到 BKS=1211，其中 128 条链配置的平均偏差为 0.099%。在当前实验口径下，rat99 是 QLSA 相对 SA 展现质量优势的最清晰实例。
+
+如下图，定向增强后的最小偏差和平均偏差共同说明了搜索预算的作用。最小偏差反映是否找到过 BKS，平均偏差反映多次运行的稳定性；两者一起看，比只看一次最好结果更可靠。
+
+![定向增强后的解质量](../../figures/final/fig_course_04_targeted_quality.png)
+
+关键配置可概括为以下几行。
+
+| 实例 | 算法 | 代表配置 | 最短路径长度 | 最小偏差 | 平均偏差 |
 |---|---|---|---:|---:|---:|
-| eil101 | QLSA | 1e6 iterations, 64 chains | 629 | 0.000% | 0.763% |
-| eil101 | SA | 2e6 iterations, 64 chains | 629 | 0.000% | 0.572% |
-| rat99 | QLSA | 2e6 iterations, 128 chains | 1211 | 0.000% | 0.099% |
-| rat99 | SA | 2e6 iterations, 128 chains | 1212 | 0.083% | 0.330% |
+| eil101 | SA | 2,000,000 次迭代，128 条链 | 629 | 0.000% | 0.477% |
+| eil101 | QLSA | 2,000,000 次迭代，128 条链 | 629 | 0.000% | 0.223% |
+| rat99 | SA | 2,000,000 次迭代，128 条链 | 1212 | 0.083% | 0.248% |
+| rat99 | QLSA | 3,000,000 次迭代，128 条链 | 1211 | 0.000% | 0.099% |
 
-rat99 是 QLSA 相对 SA 的明确质量案例：在 high-budget targeted 配置下，QLSA 达到 BKS=1211，而 SA 最好仍为 1212。该结果不能推广为 QLSA 在全部实例上占优，因为 QLSA 也带来额外时间成本。
+把默认参数实验和定向增强实验分开后，结果分工更清楚：默认参数实验主要比较并行运行时间，高预算配置观察困难实例的搜索质量上限。rat99 的结果来自搜索预算、链数和 QLSA 参数共同作用，而不是默认设置下的固定规律；正文对 QLSA 的讨论只落在 rat99、eil101 等已有数据支撑的场景中。
 
-### 8.4 Policy comparison
+为了进一步对齐参考论文的 candidate-leader 与 State-Based QLSA 思想，项目补充了 `current`、`paper`、`paper-sb` 三种 QLSA 入口的对比实验。实验使用 berlin52、eil76、rat99、eil101，300000 次迭代，32 条链，8 线程，重复 3 次，并同时比较 epsilon-greedy 与 softmax。`paper` 变体使用 current、global best、random、double-bridge 四类候选来源；`paper-sb` 在此基础上加入 Hamming diversity state，并扫描 0.3、0.5、0.7 三个多样性阈值。
 
-![Policy comparison for QLSA](../../figures/final/fig06_policy_comparison.png)
+如下图，达到 BKS 的配置对应 0% 最小偏差。paper-sb 在 eil76 和 eil101 上给出更好的最小偏差：eil76 的 paper-sb epsilon-greedy、阈值 0.7 达到 BKS=538；eil101 的 paper-sb softmax、阈值 0.5 得到 632，最小偏差为 0.477%。rat99 在该预算下仍由 current epsilon-greedy 取得较好结果，最短路径为 1231。这说明 candidate-leader 和 diversity state 对部分实例有效，但也需要结合实例结构和预算选择。
 
-图 7：epsilon-greedy 与 softmax 策略对比。
+![QLSA 机制对齐变体的最小偏差对比](../../figures/final/fig_qlsa_variant_alignment.png)
 
-policy comparison 表明 softmax 并非在所有实例上稳定优于 epsilon-greedy，rat99 中 epsilon-greedy 的质量明显更好。该实验比较的是工程 QLSA 策略实现，不等同于论文 softmax 机制的完整复现。
+### 7.4 QLSA 策略对比
 
-### 8.5 CUDA positioning
+QLSA 的动作选择策略对结果有直接影响。epsilon-greedy 与 softmax 在 eil76 和 eil101 上差距不大：eil76 的平均偏差分别为 0.892% 和 0.855%，eil101 的平均偏差分别为 1.335% 和 1.176%。但在 rat99 上，epsilon-greedy 的平均偏差为 0.512%，softmax 上升到 3.815%。这一差异说明，动作选择策略对实例结构敏感，单个实例不足以判断策略优劣。
 
-![CUDA positioning on berlin52](../../figures/final/fig07_cuda_positioning.png)
+如下图，rat99 的 softmax 柱明显高于 epsilon-greedy，而 eil76 和 eil101 的差距较小。该现象也解释了为什么后续 rat99 的质量增强主要采用 epsilon-greedy：在本项目实现中，它对该实例更稳。
 
-图 8：berlin52 中 serial、OpenMP 与 CUDA 时间对比。
+![QLSA 动作选择策略对比](../../figures/final/fig_course_05_policy_comparison.png)
 
-CUDA 后端可以编译运行并找到 BKS，但在小实例上尚未形成相对 OpenMP 的性能替代结论。主要原因是 kernel 启动、每条 chain 工作量不足、GPU 并行粒度仍偏 coarse-grained。报告中只把 CUDA 作为工程复杂度和后续优化方向。
+这组结果把 QLSA 的策略敏感性单独呈现出来。参考论文中也比较了 softmax 和 epsilon-greedy，但论文的 candidate-leader 机制、状态设计和实验环境与本项目不同。因此，本节结论只对应当前 C++ 版本：QLSA 的质量收益与状态、动作、奖励和参数设置共同相关，策略选择本身也是需要实验验证的设计变量。
 
-### 8.6 CUDA candidate-level evaluation
+### 7.5 CUDA 后端实验与边界
 
-![CUDA candidate mode comparison](../../figures/final/fig15_cuda_candidate_mode.png)
+CUDA 后端围绕同一个问题展开：GPU 上如果只把“搜索链”并行化，每条链内部仍然由少数线程完成路径操作，GPU 计算密度不足；如果在块内同时评价多个候选 2-opt 移动，GPU 线程可以参与更多实际计算，但每次迭代的候选选择方式也会改变。为区分这两类作用，实验保留多链模式，并增加候选批量评价、候选选择策略和并行路径反转三组对照。
 
-图 9：CUDA chain mode 与 candidate mode 的 formal small experiment 用时对比。
+当前 CUDA 实现包含以下执行路径：
 
-CUDA 后端已经从原始 chain-level multi-chain 扩展到显式 `--cuda_mode candidate`。该模式仍保持 one block per chain，但在每个 iteration 中使用 block 内多个线程并行评估候选 2-opt move，把候选 `(delta, i, k)` 写入 shared memory，并通过 block-level reduction 选择代表 move。由于每轮 proposal 从单候选变为 batch proposal，该模式在报告中单独标记为 CUDA candidate-level evaluation，不与原始 SA move 采样过程混写。
+- **多链模式**：一个线程块负责一条链，主要对齐原多链搜索结构，运行时间较短。
+- **候选批量评价 best 策略**：块内线程同时评价多个候选，选择增量最小者进入接受判定，偏向解质量。
+- **候选批量评价 random 策略**：块内线程仍批量生成候选，但随机选取一个候选，减少批量择优对提案分布的影响。
+- **候选批量评价 hybrid 策略**：在 best 与 random 之间交替，用于观察质量收益和随机提案之间的折中。
+- **并行路径反转与最优路径复制**：候选被接受后，块内线程协作完成路径反转；更新最优路径时也由块内线程协作复制，减少 thread 0 长循环。
 
-本轮进一步补齐了三个工程缺口：第一，`--qlsa --parallel cuda --cuda_mode candidate` 已经接入，algorithm 字段区分为 `qlsa-cuda-candidate`；第二，新增 `--cuda_reversal_mode serial|parallel`，其中 parallel reversal 由 block 内线程协作交换 2-opt 区间，默认仍保持 serial 以兼容历史结果；第三，候选策略支持 `best`、`random` 和 `hybrid`，用于比较批量择优、随机提案和折中策略。
+如下图左侧显示运行时间，候选批量评价模式在 ch130、a280、lin318、rat575 上均慢于多链模式；右侧显示最小偏差，候选批量评价模式的路径质量更好。ch130 和 a280 的候选批量评价达到 BKS，lin318 的偏差从 5.720% 降至 0.447%，rat575 从 19.091% 降至 2.229%。
 
-![CUDA QLSA candidate comparison](../../figures/final/fig21_cuda_qlsa_candidate.png)
+![CUDA 多链模式与候选批量评价模式](../../figures/final/fig_course_06_cuda_boundary.png)
 
-图 10：CUDA SA/QLSA chain 与 candidate mode 在 berlin52、eil101、ch130、a280 上的对比。
+关键结果如下。这个对比展示的是候选批量评价带来的质量变化，以及对应的运行时间成本。
 
-| instance | algorithm | mode | reversal | best | Gap | mean ms |
-|---|---|---|---|---:|---:|---:|
-| a280 | SA | candidate | parallel | 2579 | 0.0000% | 1512.642 |
-| a280 | QLSA | candidate | parallel | 2579 | 0.0000% | 1985.010 |
-| a280 | QLSA | chain | serial | 2739 | 6.2040% | 1153.319 |
-| ch130 | QLSA | candidate | parallel | 6110 | 0.0000% | 2046.892 |
-| berlin52 | SA/QLSA | candidate | serial/parallel | 7542 | 0.0000% | 1471-2400 |
+| 实例 | 多链模式最小偏差 | 候选批量评价最小偏差 | 候选批量评价平均时间 |
+|---|---:|---:|---:|
+| ch130 | 1.080% | 0.000% | 1.371 s |
+| a280 | 6.282% | 0.000% | 1.466 s |
+| lin318 | 5.720% | 0.447% | 1.438 s |
+| rat575 | 19.091% | 2.229% | 1.691 s |
 
-candidate mode 在 a280、ch130 等实例上显著改善了 best length，说明 GPU block 内批量候选评价能提升搜索覆盖率；但 elapsed time 通常仍高于 chain mode 或 OpenMP，主要开销来自区间反转、同步和 shared-memory reduction。因此可写的结论是“CUDA candidate-level 路径已经具备工程可运行性和质量潜力”，不能写成“CUDA 已成为主性能后端”。
+并行路径反转实验进一步定位了瓶颈：
 
-![CUDA parallel reversal comparison](../../figures/final/fig22_cuda_parallel_reversal.png)
+- **SA candidate**：并行反转相对串行反转只有约 1.03 到 1.04 倍改善。
+- **QLSA candidate**：并行反转可达到约 1.14 到 1.49 倍改善。
+- **瓶颈来源**：路径反转确实是瓶颈之一，但候选生成、全局内存访问和线程同步仍然影响整体时间。
 
-图 11：CUDA candidate mode 中 serial reversal 与 parallel reversal 的时间对比。
+候选选择策略实验给出了更细的解释。300,000 次迭代、64 条链的 formal 对照中，`best` 策略在中等规模实例上降低偏差；`random` 策略运行时间更接近多链模式，但路径质量通常也更接近多链模式。新增的 `hybrid` 策略用于补充 best/random 之间的折中观察。下面几行展示 SA 和 QLSA 在代表实例上的最小偏差变化。
 
-parallel reversal 对 QLSA candidate 的改善更明显：例如 a280 上 QLSA candidate 从 2951.838 ms 降到 1985.010 ms，局部 speedup 为 1.49x；ch130 上从 2728.945 ms 降到 2046.892 ms，局部 speedup 为 1.33x。SA candidate 的收益较小，说明 reversal 不是唯一瓶颈，候选生成、同步和 Metropolis 判定仍然限制整体性能。
+| 实例 | 算法 | 多链模式偏差 | best 候选偏差 | random 候选偏差 |
+|---|---|---:|---:|---:|
+| a280 | SA | 7.251% | 0.000% | 6.592% |
+| a280 | QLSA | 7.833% | 0.155% | 7.484% |
+| lin318 | SA | 6.745% | 0.419% | 7.333% |
+| lin318 | QLSA | 6.636% | 0.426% | 6.831% |
+| rat575 | SA | 26.620% | 3.012% | 27.049% |
+| rat575 | QLSA | 19.637% | 2.628% | 21.025% |
 
-### 8.7 MPI + OpenMP formal scaling
+这组数据说明，CUDA 候选批量评价的主要收益来自“在同一次迭代中比较多个候选”。`best` 策略把搜索推向更强的局部改进，因此质量提升更大；`random` 策略保留批量生成但不做批量择优，运行时间下降，质量收益也随之减弱；`hybrid` 策略在补充实验中表现为二者之间的折中。
 
-![MPI VM formal scaling](../../figures/final/fig13_mpi_vm_scaling_formal.png)
+下图进一步只取 SA 的运行时间作对照。它把同一实例下的多链模式、best 候选和 random 候选放在一起，便于观察候选选择策略的时间代价。补充的 hybrid 策略在 a280 上得到介于 best 与 random 之间的结果：SA 最小偏差为 1.047%，QLSA 最小偏差为 0.814%；运行时间也位于 best 和 random 之间。
 
-图 10：双 VM MPI formal scaling 中 np=2 相对 np=1 的 speedup。
+![CUDA SA 候选策略用时对比](../../figures/final/fig_cuda_candidate_policy_formal.png)
 
-| family | threads/rank | np=1 mean ms | np=2 mean ms | speedup | efficiency |
-|---|---:|---:|---:|---:|---:|
-| SA | 2 | 2604.738 | 1312.730 | 1.9842 | 99.21% |
-| SA | 4 | 2619.846 | 1309.360 | 2.0009 | 100.04% |
-| QLSA | 2 | 3863.947 | 2276.523 | 1.6973 | 84.87% |
-| QLSA | 4 | 3825.010 | 2106.975 | 1.8154 | 90.77% |
+运行时间方面，多链模式仍然最快。以 SA 为例，a280 上多链、best 候选、random 候选的平均时间约为 367 ms、889 ms、609 ms；lin318 上约为 327 ms、895 ms、599 ms；rat575 上约为 421 ms、933 ms、645 ms。候选批量评价增加了共享内存写入、块内同步、路径反转和最优路径复制，质量收益由这些额外代价换来。
 
-formal scaling 使用 berlin52、iterations=300000、chains=64、repeat=3。SA 接近理想 2x，QLSA 也达到 1.70x-1.82x。通信开销均值约 5-6 ms，说明该粒度下通信不是主瓶颈。该结论仍限定在 VMware NAT 双 VM 环境，不能外推为生产集群性能。
+Nsight Systems 进一步验证了这一判断。由于项目路径包含中文目录，profiling 时先把可执行文件和 a280 数据临时放到 ASCII 路径下运行。100000 次迭代、64 条链、hybrid 策略的记录中，Host-to-Device 数据约 0.314 MB，Device-to-Host 数据约 0.074 MB，传输规模很小；CUDA API 时间主要集中在 `cudaDeviceSynchronize`，约 637 ms。该配置的主要代价来自设备端 kernel 执行等待，而不是主机和设备之间的数据搬运。Nsight Compute 已安装，当前驱动权限未开放 GPU performance counters，本次记录 Systems 层面的时间分解，未采集 occupancy 或内存带宽数值。
 
-### 8.8 大规模实例工程压力测试
+CUDA 实验展示了 GPU 端候选批量评价、块内协作路径操作和候选策略组合已经实现，并且在若干中等规模实例上能换取更短路径。若只比较运行时间，当前 CUDA 多链和候选模式都不是最快选择；若比较相同迭代预算下的路径质量，candidate-best 是有价值的 GPU 搜索变体。OpenMP 仍承担本文的主要性能结论。
 
-![Large OpenMP stress status](../../figures/final/fig16_large_openmp_gap_time.png)
+### 7.6 MPI + OpenMP 双虚拟机实验
 
-图 11：大规模 OpenMP 压力测试的 Gap 与运行时间。
+MPI + OpenMP 实验验证了多搜索链在分布式内存环境下的自然划分方式。每个 MPI 进程负责一组搜索链，进程内部使用 OpenMP；进程间只在结果汇集阶段交换局部最优信息。由于通信频率很低，这类任务比需要频繁同步的细粒度并行更适合 MPI。
 
-![Large CUDA chain candidate status](../../figures/final/fig17_large_cuda_chain_vs_candidate.png)
+如下图，berlin52 formal scaling 中，SA 的 np=2 结果接近理想 2 倍：每进程 2 线程时加速比为 1.98，每进程 4 线程时为 2.00。QLSA 的 np=2 加速比为 1.70 到 1.82，低于 SA，但仍体现了跨虚拟机分配搜索链的可行性。通信时间保持在约 5 到 6 毫秒量级，相对总运行时间很小。
 
-图 12：大规模 CUDA chain 与 candidate mode 对比。
+![双虚拟机 MPI 与 OpenMP 扩展性实验](../../figures/final/fig_course_07_mpi_scaling.png)
 
-![Large MPI VM status](../../figures/final/fig18_large_mpi_vm_scaling.png)
+关键结果如下。
 
-图 13：大规模 MPI + OpenMP VM quick scaling。
+| 算法 | 每进程线程数 | np=2 加速比 | 并行效率 | 通信时间 |
+|---|---:|---:|---:|---:|
+| SA | 2 | 1.98 | 99.21% | 4.92 ms |
+| SA | 4 | 2.00 | 100.04% | 6.39 ms |
+| QLSA | 2 | 1.70 | 84.87% | 5.73 ms |
+| QLSA | 4 | 1.82 | 90.77% | 5.21 ms |
 
-为验证完整工程在 130-1000 城市级 TSPLIB95 实例上的可扩展性，项目增加 L1/L2/L3 实例分层、download status、inventory、DistanceMatrix 内存估算和 OpenMP/CUDA/MPI 运行脚本。数据准备阶段已经下载 L1 全部 8 个实例、L2 全部 10 个实例，以及 L3 中的 dsj1000、u1060、vm1084；pr1002 和 si1032 当前镜像返回 404，保留为 missing。下载来源、EDGE_WEIGHT_TYPE 和 SHA256 记录在 `results/final/large_instance_download_status.csv`。
+结果中的 SA 效率接近 100%，主要原因是两台虚拟机承担的搜索链相互独立，最终汇集数据量很小。QLSA 加速比低一些，原因与 OpenMP 实验中的观察一致：学习更新和随机链行为使各进程负载更不均衡。该实验展示的是双虚拟机分布式内存执行路径；其价值在于验证 MPI 进程级分工、OpenMP 进程内并行和低通信量归约能够协同工作。
 
-OpenMP 大实例实验已经形成可引用的工程压力测试结果。L1 formal 使用 8 个 130-280 城市实例、iterations=1,000,000、chains=64、threads=8、repeat=3；L2 formal subset 进一步在 lin318、pcb442、rat575 上使用 iterations=1,000,000、repeat=3；L3 quick 在 dsj1000、u1060、vm1084 上使用 iterations=100,000、repeat=1。该证据说明工程链路可以稳定处理 1000-city 级输入和百万迭代级预算，但不能写成“百万城市级实例已跑通”。
+从通信模型看，MPI 进程之间不交换每一步搜索状态，也不共享 Q 表。每个进程只需要在结束时提交本地最短路径长度和对应路径。以 berlin52 为例，最优路径只包含 52 个城市编号，通信数据量远小于搜索过程中完成的 64 条链和百万级迭代。因此，通信时间维持在毫秒级是符合任务结构的。若将该方法迁移到更多节点，主要风险不在通信量本身，而在不同进程搜索链耗时不均衡以及虚拟化或网络环境带来的波动。
 
-CUDA 大实例实验只运行 SA，并比较 chain mode 与 candidate mode。formal subset 覆盖 ch130、a280、lin318、rat575，参数为 iterations=500,000、repeat=3、chains=64、block=128、candidates=128。candidate mode 在部分实例上改善解质量，但仍慢于 chain mode，且不作为 OpenMP 的性能替代结论；因此该结果应解释为 GPU block-level candidate evaluation 路径可行，而不是 CUDA 主性能优势。
+### 7.7 大实例压力测试
 
-MPI + OpenMP large quick 已在两台 Ubuntu VM 上通过真实 `mpirun` 完成。实例为 ch130、a280、lin318，np=1/2、threads/rank=2/4、chains=64、iterations=300,000、repeat=1。np=2 相对 np=1 的 speedup 多数接近 2x，communication_ms 处于毫秒级，说明 rank-level chain decomposition 的通信开销较低。该结论限定为 VMware NAT 双 VM 环境下的工程证据，不等同生产 HPC 集群 benchmark。
+大实例实验的价值在于验证完整工程能处理更大的 TSPLIB95 实例，并观察问题规模增大后质量和时间的变化。本组数据覆盖 `data/` 目录下 38 个可用实例，正文选取 10 个代表实例进行分析：小规模基准 berlin52，默认困难实例 eil76、rat99、eil101，中等规模 a280、rat575、rat783，以及千点级 dsj1000、u1060、vm1084。所有代表实例均使用 1,000,000 次迭代、64 条搜索链、8 线程和 3 次重复运行。
 
-### 8.9 OpenMP 大实例 scaling
+这些实例的难度并不只由城市数决定。eil76、rat99、eil101 的规模不算大，但默认参数下会出现非零偏差，说明其局部结构对当前扰动和温度参数更敏感；a280、rat575、rat783 的城市数增加后，路径排列空间快速扩大，同样迭代预算下覆盖比例下降；dsj1000、u1060、vm1084 接近一千个城市，主要用于检查距离矩阵、路径操作、OpenMP 多链和结果流水线能否承受更大的输入规模。
 
-![OpenMP large scaling](../../figures/final/fig19_openmp_large_scaling.png)
+从内存角度看，距离矩阵需要 $O(n^2)$ 空间。千点级实例的矩阵约为一百万个距离值，使用 32 位整数时约为数 MB，仍在本机内存和 GPU 设备内存可承受范围内；但城市数继续上升时，矩阵空间和初始化时间会快速增加。因此，千点级结果在本文中作为压力测试使用，不外推到更大规模实例。
 
-图 14：a280 与 rat575 上的 OpenMP 线程扩展性。
+如下图展示代表实例的最小偏差和平均运行时间。随着城市数量增加，默认百万迭代预算下的偏差整体上升；同时，QLSA 的运行时间大约是 SA 的 1.7 至 2.2 倍。这个时间差来自动作选择和 Q 表更新，但在 rat575、rat783、dsj1000、u1060、vm1084 等较大实例上，QLSA 的最小偏差均低于 SA。
 
-OpenMP large scaling 选择 a280 与 rat575，threads=1/2/4/8/12，chains=64，iterations=500,000，repeat=3。结果显示，随着线程数增加，SA 和 QLSA 均获得稳定 speedup，但 8-12 线程后 efficiency 下降，说明线程调度、链间随机耗时差异和内存层次开销开始显现。rat575 相比 a280 具有更大单实例工作量，能更好摊销部分固定开销，但仍受限于每条 chain 内部串行 2-opt 更新。
+![代表实例 OpenMP 压力测试](../../figures/final/fig_course_11_representative_openmp.png)
 
-### 8.10 CUDA candidate 参数扫描与 profiling
+代表实例中，berlin52 的 SA 和 QLSA 均达到 BKS；eil76、rat99、eil101 在默认预算下仍有小偏差，这与第 7.2 节默认参数结论一致。规模继续增大后，a280 的 QLSA 最小偏差为 4.381%，SA 为 4.575%；rat575 中 QLSA 为 9.523%，SA 为 11.192%；rat783 中 QLSA 为 14.195%，SA 为 19.123%。这些结果说明，在更大规模的默认预算压力测试中，QLSA 经常能换取更好的路径质量，但代价是更长运行时间。
 
-![CUDA candidate sweep tradeoff](../../figures/final/fig23_cuda_candidate_sweep_tradeoff.png)
+千点级代表实例也完成了百万迭代运行。dsj1000 中，SA 最小偏差为 10.333%，QLSA 为 9.349%；u1060 中，SA 为 27.627%，QLSA 为 19.301%；vm1084 中，SA 为 25.285%，QLSA 为 18.539%。这些结果不追求直接达到 BKS，而是说明当前工程能够把 TSPLIB95 千点级实例纳入同一运行、汇总和可视化流程。
 
-图 15：CUDA candidate 参数扫描中的时间与 Gap 折中。
+## 8 与参考论文结果对比
 
-CUDA candidate sweep 覆盖 a280 与 lin318，并同时包含 SA 与 QLSA candidate。扫描参数包括 block_size=64/128、candidates_per_iter=32/64/128、iterations=200,000、repeat=2、chains=64，并比较 serial 与 parallel reversal。结果表明，增加 candidates_per_iter 往往能改善解质量，但不会单调改善时间；例如 a280 上 QLSA candidate 在 candidates=64 时可把 Gap 降到 0.1551%，而 candidates=128 的时间更高且质量未必进一步改善。该现象符合 batch proposal 的预期：候选数增加提高每轮选择质量，但同步、reduction 和 reversal 成本也随之上升。
+与参考论文对比时，本报告采用“质量指标为主、时间指标为辅”的口径。同一 TSPLIB95 实例上的最短路径长度和 Gap 可以围绕 BKS 讨论；运行时间则受到语言、硬件和实现方式影响，只作为背景参考。
 
-![CUDA profiling status](../../figures/final/fig21_cuda_profiling_breakdown.png)
+参考论文与本项目的关系可以分为“继承”和“扩展”两部分。继承部分是 SA、QLSA、2-opt、Metropolis 接受准则和 Q-learning 辅助搜索思想；扩展部分是 C++20 工程化、多搜索链并行、CUDA 候选批量评价、MPI + OpenMP 分布式运行和自动实验流水线。
 
-图 16：CUDA profiling 工具链状态。
+| 对比项 | 参考论文 | 本项目 |
+|---|---|---|
+| 算法核心 | SA、QLSA、State-Based QLSA | SA、QLSA、`paper` / `paper-sb` 机制对齐入口 |
+| 实现环境 | Python 生态，不同硬件平台 | C++20，Windows 主机，CUDA，Ubuntu VM |
+| 并行后端 | 论文重点在算法质量比较 | OpenMP、CUDA、MPI + OpenMP |
+| 指标 | 最优值、均值、标准差、Gap、时间 | 最短路径、Gap、运行时间、加速比、并行效率、通信时间 |
+| 对比口径 | 论文内部方法比较 | 共同实例上的质量参考，不做同平台时间排名 |
 
-Nsight Systems 当前 Windows PATH 中未找到；Nsight Compute 已成功捕获 `sa_candidate_kernel` 并生成 `results/logs/nsight/cuda_candidate_a280_ncu.ncu-rep`。由于本次 speedOfLight section 未采集到完整 metrics，报告只把 profiling 写作“CUDA kernel 可被 profiling 工具捕获，后续可继续分析 occupancy / memory throughput”，不写 occupancy、带宽或 CUDA 性能优势结论。
+如下图，参考论文中的 QLSA 系列方法相对于论文 SA 明显降低了困难实例的平均偏差；本项目在调优和定向增强后，也能把 rat99 和 eil101 推近或达到 BKS。
 
-### 8.11 MPI large quick / formal subset
+![困难实例平均偏差参考对比](../../figures/final/fig_course_09_paper_quality.png)
 
-![Large instance MPI VM scaling](../../figures/final/fig18_large_mpi_vm_scaling.png)
+从上图可以看出，论文验证了学习辅助搜索在困难实例上的价值，本项目则进一步展示了 C++ 工程化和多链并行下的质量表现。rat99 和 eil101 的高预算结果说明，多搜索链和参数选择可以把困难实例进一步推近 BKS；paper / paper-sb 对齐实验则说明 candidate-leader 与 diversity state 已经进入同一工程框架，可以和 current 变体放在同一实验口径下比较。
 
-图 17：大实例 MPI + OpenMP 在双 VM 上的 np=2 相对 np=1 speedup。
+运行时间方面，论文使用 Python 生态和不同硬件环境，本项目使用 C++20 和多后端并行实现。因此，时间对比的意义在于说明工程实现路径差异，而不是把不同平台的绝对时间直接排名。更有价值的比较是：参考论文说明 Q-learning 辅助搜索值得研究，本项目进一步说明这一思想可以被组织为可测试、可并行、可扩展的工程系统。
 
-MPI large quick 已在两台 Ubuntu VM 上通过真实 `mpirun` 完成，覆盖 ch130、a280、lin318、rat575，参数为 iterations=300,000、chains=64、repeat=1、np=1/2、threads/rank=2/4，并同时运行 SA 与 QLSA。随后又执行了 formal subset：ch130 与 a280，repeat=3。报告只使用 VM1/VM2 代称，不记录 IP、用户名或密钥路径。
+## 9 实施过程中遇到的问题
 
-| instance | family | threads/rank | np=1 mean ms | np=2 mean ms | speedup | efficiency | comm ms |
-|---|---|---:|---:|---:|---:|---:|---:|
-| ch130 | SA | 2 | 2781.477 | 1406.447 | 1.9777 | 98.88% | 6.675 |
-| ch130 | SA | 4 | 2798.604 | 1507.186 | 1.8568 | 92.84% | 10.062 |
-| ch130 | QLSA | 2 | 4542.144 | 2114.380 | 2.1482 | 107.41% | 5.399 |
-| ch130 | QLSA | 4 | 4305.763 | 2109.813 | 2.0408 | 102.04% | 11.102 |
-| a280 | SA | 2 | 2890.839 | 1494.956 | 1.9337 | 96.69% | 7.028 |
-| a280 | SA | 4 | 2985.585 | 1456.008 | 2.0505 | 102.53% | 6.381 |
-| a280 | QLSA | 2 | 4265.610 | 2101.179 | 2.0301 | 101.51% | 5.009 |
-| a280 | QLSA | 4 | 4383.042 | 2092.496 | 2.0946 | 104.73% | 5.283 |
+**第一，链级任务划分需要和算法粒度匹配。**
 
-这些结果证明 rank-level chain decomposition 可以扩展到分布式内存环境：每个 rank 独立运行一组 chains，rank 内继续使用 OpenMP，最终通过 MPI 归约得到全局最优。由于实例规模和 VM 环境较小，部分 speedup 超过 2x 属于运行波动、虚拟化调度和 cache/CPU 分配差异的综合结果，不能解释为超线性 HPC 性能结论。可写入报告的边界是：MPI + OpenMP 大实例 quick/formal subset 已真实跑通，通信开销量级为数毫秒到十余毫秒，工程链路完整；不能写成生产集群 benchmark。
+SA/QLSA 的一次 2-opt 候选评价只涉及四条边，计算量很小；一条搜索链却包含大量迭代、随机数状态和历史最优路径。如果在 CPU 上把每次候选移动拆成线程协作任务，线程调度和同步成本会反复进入内层循环。项目最终采用链级并行，把同步集中到搜索结束后的归约阶段。这个选择同时影响 OpenMP、CUDA 和 MPI 三个后端，是整个并行设计的基础。
 
-MPI island migration 本轮没有实现。原因是现有 SA/QLSA chain runner 以完整链为单位执行，不暴露可安全暂停和恢复的 mid-run state；在没有 chunked search API 的情况下强行添加 CLI 会造成伪实现。该方向保留为后续工作，不作为本次已实现结果。
+**第二，CUDA 的并行度和路径操作成本需要同时处理。**
 
-## 9. 与近期论文结果对比
+CUDA 候选批量评价让块内线程参与 2-opt 候选计算，`best` 策略在 a280、lin318、rat575 上明显降低偏差；但路径反转、块内同步和全局内存访问仍然占用时间。项目为此实现了并行路径反转、候选策略对照和最优路径协作复制。实验结果显示，GPU 端可以通过批量候选改善质量，但当前运行时间仍受路径操作和同步影响。
 
-本节将对比分为两类：第一类是与论文原文表格的参考对比，第二类是本工程在同一机器上构造的 Python faithful baseline 与 C++/OpenMP 实现的直接对比。这样划分是必要的，因为论文原文运行环境与该工程环境不同，绝对运行时间不能直接解释为同平台性能优劣；而同机 Python baseline 能更直接说明工程化重写和并行化带来的实际收益。
+**第三，QLSA 质量收益依赖参数和实例。**
 
-![Paper runtime reference comparison](../../figures/final/fig08_paper_runtime_comparison.png)
+默认参数下，QLSA 在 eil76、rat99、eil101 上并不优于 SA。后续实验把默认参数、独立验证和定向增强分开，避免把调参阶段的偶然最好值直接写成稳定结论。最终报告只在 rat99 high-budget 等有数据支撑的场景中写 QLSA 的质量收益，同时保留默认参数下的对照结果。
 
-图 13：论文 Table 8 时间与本工程 OpenMP 时间参考对比。
+## 10 总结与后续工作
 
-![Paper and project hard instance quality comparison](../../figures/final/fig09_paper_quality_comparison.png)
+从性能角度看，OpenMP 多链并行是本项目最可靠的结果。它利用搜索链之间的独立性，在六个 TSPLIB95 默认实例上获得约 5 倍平均加速，同时保持了解质量的可比性。
 
-图 14：hard instances 中论文质量数据与本工程调优/增强结果对比。
+从算法角度看，QLSA 在选定困难实例上体现出质量收益，尤其 rat99 的 high-budget 实验中达到 BKS=1211，而 SA high-budget 最好为 1212。与此同时，QLSA 对参数和实例结构敏感，报告只把它描述为在部分实例和预算下有效的质量增强方法。
 
-参考论文主要验证算法质量，该工程补充了并行工程维度：C++20 内核提供高性能串行基线，OpenMP 多链并行提供稳定约 5x 加速，CUDA 后端完成 GPU 路径验证，MPI + OpenMP 在双虚拟机上完成真实跨节点运行。该部分是相对论文的主要扩展：它将论文中的随机搜索思想转化为一个可构建、可测试、可复现实验、可跨后端运行的并行优化系统。
+从工程角度看，项目完成了 C++20 搜索内核、OpenMP、CUDA 和 MPI + OpenMP 多后端实现，并建立了从 TSPLIB95 数据、程序运行、结果汇总到图表报告的可复现实验流程。CUDA 和 MPI 扩展提高了工程复杂度，也暴露出实际并行系统中的代价。
 
-## 10. 工程难度与证据等级
+后续工作可以沿以下方向继续：
 
-工程难度体现在四个层面：C++20 内核控制了数据结构和内层循环；OpenMP/CUDA/MPI 覆盖共享内存、GPU 和分布式内存三类并行后端；实验流水线把 CLI、CSV、summary、figures 和 report 连接起来；课程提交入口固定和隐私检查保证提交材料可控。
-
-| 结论 | 支撑数据 | 证据等级 | 是否主结论 |
-|---|---|---|---|
-| OpenMP SA/QLSA 约 5x 加速 | 6 实例、repeat=3 | 强 | 是 |
-| QLSA 在 rat99 high-budget 达 BKS | targeted repeat=5 | 中强 | 是，质量结论 |
-| MPI + OpenMP 双 VM 可扩展 | formal scaling repeat=3 | 中强 | 工程/HPC 结论 |
-| CUDA candidate mode 已接入 | CUDA formal/large quick | 中 | 工程扩展 |
-| CUDA 小实例加速主张 | 无 | 无 | 否 |
-| SB-QLSA 全机制实现 | 无 | 无 | 否 |
-
-## 11. 局限性
-
-CUDA 后端已完成 chain mode 和 SA candidate-level evaluation，但 candidate mode 在当前 small/formal、large/formal 和参数扫描实验中仍慢于 chain mode，且不作为 OpenMP 的性能替代结论，因此不适合作为性能主结论；同时 QLSA candidate mode 尚未接入主实验。C++ QLSA 是论文思想的工程化变体，不等于完整 SB-QLSA。MPI 实验运行在 VMware NAT 双 VM 中，只能说明跨节点执行链路、rank-level decomposition 和 quick/formal scaling，不等同生产 HPC 集群 benchmark。大实例实验已经覆盖 L1 formal、L2 formal subset、L3 quick、CUDA large formal 和 MPI large quick，但这些结果用于工程可扩展性与趋势分析，不应写成所有大实例达到 BKS 的结论。L3 仍只做短预算 quick，pr1002/si1032 仍缺失。
-
-## 12. 总结
-
-性能贡献：OpenMP multi-chain 在 6 个 TSPLIB95 实例上获得稳定约 5x 加速，MPI + OpenMP 进一步证明该并行粒度可扩展到双 VM distributed-memory 环境。
-
-算法贡献：SA/QLSA 均完成 C++20 工程化实现，调优与定向增强使 rat99、eil101 等 harder instances 的解质量接近或达到 BKS，其中 rat99 high-budget 显示 QLSA 具有明确质量优势。
-
-工程贡献：项目形成了 parser、算法内核、多后端并行、自动实验、图表、报告、隐私检查和提交包的完整流水线，满足课程对完成情况、技术难度、论文对比和报告质量的综合要求。
+- **分布式搜索增强**：在真实多节点环境中实现周期性最优路径交换，比较普通多链搜索与 island migration 的差异。
+- **统计检验补充**：在更多实例和重复次数上加入显著性检验，区分随机波动和算法差异。
 
 ## 参考文献
 
-1. Adil, N., Eddaoudi, F., Lakhbab, H., & Naimi, M. (2026). Q-Learning-Assisted Simulated Annealing for Traveling Salesman Problem Optimization. *Statistics, Optimization & Information Computing*, 15(5), 3706-3730. https://doi.org/10.19139/soic-2310-5070-3028
-2. Reinelt, G. TSPLIB: A Traveling Salesman Problem Library. *ORSA Journal on Computing*, 3(4), 376-384, 1991.
-3. OpenMP Architecture Review Board. OpenMP Application Programming Interface Specification.
-4. NVIDIA. CUDA C++ Programming Guide.
-5. MPI Forum. MPI: A Message-Passing Interface Standard.
-6. Kirkpatrick, S., Gelatt, C. D., & Vecchi, M. P. Optimization by Simulated Annealing. *Science*, 220(4598), 671-680, 1983.
+[1] Adil, N., Eddaoudi, F., Lakhbab, H., & Naimi, M. (2026). Q-Learning-Assisted Simulated Annealing for Traveling Salesman Problem Optimization. *Statistics, Optimization & Information Computing*, 15(5), 3706-3730. https://doi.org/10.19139/soic-2310-5070-3028
 
-## 附录 A：个人工作说明
+[2] Reinelt, G. TSPLIB: A Traveling Salesman Problem Library. *ORSA Journal on Computing*, 3(4), 376-384, 1991.
 
-本课程作业为单人团队完成，团队成员为陈乐浚，学号 22361054。
+[3] Kirkpatrick, S., Gelatt, C. D., & Vecchi, M. P. Optimization by Simulated Annealing. *Science*, 220(4598), 671-680, 1983.
 
-单人团队完成了选题、论文阅读、C++ 工程框架、TSPLIB95 parser、SA/QLSA 实现、OpenMP 多链并行、CUDA 后端、MPI + OpenMP hybrid 后端、实验脚本、参数调优、结果分析、图表生成和最终报告整理。实现过程中重点解决了 TSPLIB 数据准备、CUDA/Ninja 构建、Windows Python 启动器、双 VM Open MPI 路径一致性、课程提交入口边界和报告编码检查等问题。最终材料同时保留工程源码、实验 CSV、图表和复现命令，保证报告中的主要结论可追溯。
+[4] OpenMP Architecture Review Board. *OpenMP Application Programming Interface Specification*.
+
+[5] NVIDIA. *CUDA C++ Programming Guide*.
+
+[6] Sutton, R. S., & Barto, A. G. *Reinforcement Learning: An Introduction*. MIT Press.

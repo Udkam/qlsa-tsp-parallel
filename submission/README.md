@@ -1,11 +1,8 @@
-﻿# Submission Package
+# Submission Package
 
-唯一提交入口：`submission/course/`。
+当前最终提交文档位于：
 
-包含：
-- `final_report.md`：课程提交版最终报告，含个人工作说明附录。
-- `reproduction_commands.md`：关键构建与实验复现命令。
-- `figures/`：报告实际引用的图。
-- `results_key/`：报告结论对应的关键 CSV 和结果索引。
+- 项目报告：`docs/final/final_report_course.md`
+- 个人报告：`docs/final/personal_report.md`
 
-旧版 public/legacy submission 已删除；当前项目只保留课程提交版报告。
+`submission/course/` 仅保留历史整理出的图表、结果索引和复现命令副本，不再维护另一份项目报告，避免出现多个报告版本。

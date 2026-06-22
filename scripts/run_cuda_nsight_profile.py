@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Run a short Nsight profiling pass for CUDA candidate mode when tools exist.
+"""Run a Nsight profiling pass for CUDA candidate mode when tools exist.
 
 The script is intentionally conservative: it records tool availability and the
 exact commands, but it does not invent occupancy/bandwidth conclusions when
@@ -26,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--block-size", type=int, default=128)
     parser.add_argument("--candidates-per-iter", type=int, default=128)
     parser.add_argument("--policy", choices=["best", "random", "hybrid"], default="best")
+    parser.add_argument("--ncu-set", default="basic")
     parser.add_argument("--output-dir", default="results/logs/nsight")
     parser.add_argument("--markdown", default="docs/dev/cuda_nsight_profile_analysis.md")
     return parser.parse_args()
@@ -42,6 +43,27 @@ def find_executable() -> Path:
         if path.exists():
             return path
     raise SystemExit("tsp_sa executable not found; build the project first")
+
+
+def find_tool(name: str) -> str | None:
+    found = shutil.which(name)
+    if found:
+        return found
+    common = []
+    if name == "nsys":
+        common = [
+            Path(r"C:\Program Files\NVIDIA Corporation\Nsight Systems 2025.1.3\target-windows-x64\nsys.exe"),
+            Path(r"C:\Program Files\NVIDIA Corporation\Nsight Compute 2025.2.0\host\target-windows-x64\nsys.exe"),
+        ]
+    elif name == "ncu":
+        common = [
+            Path(r"C:\Program Files\NVIDIA Corporation\Nsight Compute 2025.2.0\ncu.BAT"),
+            Path(r"C:\Program Files\NVIDIA Corporation\Nsight Compute 2025.2.0\ncu.exe"),
+        ]
+    for candidate in common:
+        if candidate.exists():
+            return str(candidate)
+    return None
 
 
 def run_command(command: list[str], log_path: Path) -> tuple[int, str]:
@@ -90,6 +112,7 @@ def main() -> int:
         f"- Instance: `{args.instance}`",
         f"- Iterations: `{args.iterations}`",
         f"- Candidate policy: `{args.policy}`",
+        f"- Nsight Compute set: `{args.ncu_set}`",
         f"- Executable: `{exe}`",
         "",
     ]
@@ -100,8 +123,8 @@ def main() -> int:
         print(f"[skip] missing {input_path}")
         return 0
 
-    nsys = shutil.which("nsys")
-    ncu = shutil.which("ncu")
+    nsys = find_tool("nsys")
+    ncu = find_tool("ncu")
     lines.append(f"- Nsight Systems: `{nsys or 'not found'}`")
     lines.append(f"- Nsight Compute: `{ncu or 'not found'}`")
     lines.append("")
@@ -136,7 +159,7 @@ def main() -> int:
             ncu,
             "--force-overwrite",
             "--set",
-            "speedOfLight",
+            args.ncu_set,
             "--target-processes",
             "all",
             "--export",

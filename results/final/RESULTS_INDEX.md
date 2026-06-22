@@ -20,9 +20,11 @@
 | `results/summary/tuned_validation_summary.csv` | 调优参数独立 seed 验证。 |
 | `results/summary/targeted_quality_summary.csv` | 定向增强 high-budget 质量结果。 |
 | `results/summary/policy_comparison_summary.csv` | QLSA epsilon-greedy / softmax 对比。 |
+| `results/summary/qlsa_variant_alignment_summary.csv` | `current` / `paper` / `paper-sb` 三种 QLSA 入口的代表实例对齐实验。 |
 | `figures/final/fig04_default_gap.png` | 默认参数 Gap 图。 |
 | `figures/final/fig05_tuning_curve.png` | 调优与增强 Gap 改善图。 |
 | `figures/final/fig06_policy_comparison.png` | policy comparison 图。 |
+| `figures/final/fig_qlsa_variant_alignment.png` | QLSA 机制对齐变体最小偏差图。 |
 
 ## 3. CUDA chain / candidate
 
@@ -32,6 +34,7 @@
 | `results/summary/cuda_reversal_summary.csv` | CUDA candidate serial/parallel reversal 对比。 |
 | `results/summary/cuda_candidate_sweep_aggressive_summary.csv` | CUDA candidate aggressive 参数扫描。 |
 | `results/summary/large_cuda_formal_summary.csv` | 大实例 CUDA chain/candidate formal subset。 |
+| `results/logs/nsight/cuda_candidate_a280_hybrid_nsys_ascii.log` | a280 CUDA candidate-hybrid 的 Nsight Systems 文本摘要。 |
 | `figures/final/fig15_cuda_candidate_mode.png` | CUDA chain/candidate 定位图。 |
 | `figures/final/fig17_large_cuda_chain_vs_candidate.png` | 大实例 CUDA chain/candidate 对比。 |
 | `figures/final/fig21_cuda_qlsa_candidate.png` | CUDA SA/QLSA candidate 对比。 |

@@ -4,10 +4,14 @@
 // docs/dev/paper_lite_qlsa_design.md.
 
 #include <cassert>
+#include <filesystem>
 #include <iostream>
 #include <vector>
 
+#include "tsp/distance_matrix.hpp"
+#include "tsp/qlsa.hpp"
 #include "tsp/rng.hpp"
+#include "tsp/tsplib_parser.hpp"
 #include "tsp/tour.hpp"
 
 int main() {
@@ -46,6 +50,41 @@ int main() {
         static_cast<double>(tsp::hamming_distance(base, reversed)) / n;
     assert(identical_frac < 0.5);   // low diversity
     assert(reversed_frac >= 0.5);   // high diversity
+
+    const std::filesystem::path square_path =
+        std::filesystem::path(TEST_SOURCE_DIR) / "fixtures" / "square4.tsp";
+    const tsp::Instance square = tsp::load_tsplib(square_path.string());
+    const tsp::DistanceMatrix dm(square);
+
+    tsp::SAParams sa_params;
+    sa_params.iterations = 500;
+    sa_params.seed = 7;
+    sa_params.initial_temperature = 100.0;
+    sa_params.final_temperature = 1e-3;
+    sa_params.use_nearest_neighbor_init = true;
+
+    tsp::QLSAParams paper_params;
+    paper_params.sa = sa_params;
+    paper_params.variant = "paper";
+    paper_params.policy = "epsilon-greedy";
+    paper_params.epsilon = 0.2;
+    const tsp::QLSAResult paper = tsp::run_qlsa_2opt(dm, paper_params);
+    assert(tsp::is_valid_tour(paper.best_tour, dm.size()));
+    assert(paper.best_length == 40);
+    assert(paper.q_table.size() == 1);
+    assert(paper.q_table.front().size() == 4);
+    assert(paper.action_counts.size() == 4);
+
+    tsp::QLSAParams sb_params = paper_params;
+    sb_params.variant = "paper-sb";
+    sb_params.diversity_threshold = 0.5;
+    sb_params.sa.seed = 8;
+    const tsp::QLSAResult sb = tsp::run_qlsa_2opt(dm, sb_params);
+    assert(tsp::is_valid_tour(sb.best_tour, dm.size()));
+    assert(sb.best_length == 40);
+    assert(sb.q_table.size() == 2);
+    assert(sb.q_table.front().size() == 4);
+    assert(sb.action_counts.size() == 4);
 
     std::cout << "test_qlsa_paper_lite passed\n";
     return 0;

@@ -166,7 +166,7 @@ def make_figure(summary: list[dict[str, str]], path: Path) -> None:
     colors = ["#2ca02c" if r["algorithm"] == "sa" else "#ff7f0e" for r in rows]
 
     ax.bar(labels, values, color=colors, width=0.72)
-    ax.axhline(2.0, color="#7f7f7f", linestyle="--", linewidth=1.2, label="理想 np=2")
+    ax.axhline(2.0, color="#1f77b4", linestyle="--", linewidth=1.2, label="理想 np=2")
     ax.set_title("大实例 MPI + OpenMP 加速比")
     ax.set_ylabel("相对 np=1 的 speedup")
     ax.tick_params(axis="x", labelrotation=0, labelsize=8)

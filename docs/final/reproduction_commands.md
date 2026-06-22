@@ -23,12 +23,32 @@ scripts\run_tuned_validation.bat
 scripts\run_targeted_quality.bat
 ```
 
+## QLSA 论文机制对齐变体
+
+```powershell
+.\build-cuda-ninja\tsp_sa.exe --qlsa --qlsa_variant paper --input tests\fixtures\square4.tsp --iterations 500 --seed 1 --init random --csv-only
+.\build-cuda-ninja\tsp_sa.exe --qlsa --qlsa_variant paper-sb --input data\berlin52.tsp --iterations 100000 --seed 1 --init nn --csv-only
+```
+
 ## CUDA candidate / QLSA candidate
 
 ```powershell
 py scripts\run_cuda_candidate_experiments.py --instances berlin52 eil101 ch130 a280 --algorithms sa qlsa --iterations 500000 --repeat 3 --chains 64 --block-sizes 128 --candidates-per-iter 128 --reversal-modes serial parallel --output results\raw\cuda_qlsa_candidate_raw.csv
 py scripts\analyze_cuda_qlsa_candidate.py --input results\raw\cuda_qlsa_candidate_raw.csv --output results\summary\cuda_qlsa_candidate_summary.csv --markdown docs\final\cuda_qlsa_candidate_analysis.md --figure figures\final\fig21_cuda_qlsa_candidate.png
 py scripts\analyze_cuda_reversal.py --input results\raw\cuda_qlsa_candidate_raw.csv --output results\summary\cuda_reversal_summary.csv --markdown docs\final\cuda_reversal_analysis.md --figure figures\final\fig22_cuda_parallel_reversal.png
+```
+
+CUDA 候选策略 quick 对照：
+
+```powershell
+py scripts\run_cuda_candidate_experiments.py --instances berlin52 a280 --algorithms sa qlsa --iterations 100000 --repeat 1 --chains 32 --block-sizes 128 --candidates-per-iter 128 --reversal-modes parallel --candidate-policies best random hybrid --output results\raw\cuda_candidate_hybrid_quick_raw.csv
+py scripts\analyze_cuda_candidate.py --input results\raw\cuda_candidate_hybrid_quick_raw.csv --output results\summary\cuda_candidate_hybrid_quick_summary.csv --markdown docs\dev\cuda_candidate_hybrid_quick_analysis.md --figure figures\final\fig_cuda_candidate_hybrid_quick.png
+```
+
+Nsight 检测入口：
+
+```powershell
+py scripts\run_cuda_nsight_profile.py --instance a280 --iterations 20000 --policy hybrid
 ```
 
 ## 大实例 OpenMP / CUDA

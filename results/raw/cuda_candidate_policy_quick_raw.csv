@@ -1,0 +1,7 @@
+algorithm,instance,dimension,iterations,seed,init,chains,threads,parallel,best_length,final_length,elapsed_ms,accepted_moves,improved_moves,cuda_mode,cuda_block_size,cuda_candidates_per_iter,cuda_reversal_mode,cuda_candidate_policy,log_file
+sa-cuda-chain,berlin52,52,100000,1,nn,32,128,cuda,7542,7542,112.747,302260,148533,chain,128,64,serial,,results\logs\cuda_candidate\berlin52_sa_chain_serial_best_b128_c64_20260622_213335_124605.log
+sa-cuda-candidate,berlin52,52,100000,1,nn,32,128,cuda,7542,7542,288.305,1000885,371351,candidate,128,64,serial,best,results\logs\cuda_candidate\berlin52_sa_candidate_serial_best_b128_c64_20260622_213335_456974.log
+sa-cuda-candidate-random,berlin52,52,100000,1,nn,32,128,cuda,7542,7542,184.229,302332,148377,candidate,128,64,serial,random,results\logs\cuda_candidate\berlin52_sa_candidate_serial_random_b128_c64_20260622_213335_884623.log
+qlsa-cuda-chain,berlin52,52,100000,1,nn,32,128,cuda,7542,7542,200.121,334060,152570,chain,128,64,serial,,results\logs\cuda_candidate\berlin52_qlsa_chain_serial_best_b128_c64_20260622_213336_198481.log
+qlsa-cuda-candidate,berlin52,52,100000,1,nn,32,128,cuda,7542,7542,459.231,2840013,150005,candidate,128,64,serial,best,results\logs\cuda_candidate\berlin52_qlsa_candidate_serial_best_b128_c64_20260622_213336_537735.log
+qlsa-cuda-candidate-random,berlin52,52,100000,1,nn,32,128,cuda,7542,7542,269.192,324775,151495,candidate,128,64,serial,random,results\logs\cuda_candidate\berlin52_qlsa_candidate_serial_random_b128_c64_20260622_213337_145073.log

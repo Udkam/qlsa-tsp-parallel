@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Run real MPI VM scaling experiments from VM1.
 
 This script is intentionally strict: it requires mpirun/mpiexec, a hostfile, and
@@ -353,12 +353,12 @@ def write_figure(summary: List[Dict[str, str]], path: Path) -> None:
     plt.rcParams.update({"font.size": 11, "axes.unicode_minus": False})
     fig, ax = plt.subplots(figsize=(10, 4.5), dpi=300)
     ax.bar(range(len(values)), values, color=colors)
-    ax.axhline(2.0, color="#7f7f7f", linestyle="--", linewidth=1.0, label="理想 np=2")
+    ax.axhline(2.0, color="#1f77b4", linestyle="--", linewidth=1.0, label="理想 np=2")
     ax.set_ylabel("相对 np=1 的加速比")
     ax.set_title("双 VM MPI + OpenMP 扩展性")
     ax.set_xticks(range(len(values)))
     ax.set_xticklabels(labels, rotation=30, ha="right")
-    ax.grid(axis="y", color="#dddddd", linewidth=0.6)
+    ax.grid(axis="y", color="#d6e8ff", linewidth=0.6)
     ax.legend()
     fig.tight_layout()
     fig.savefig(path)

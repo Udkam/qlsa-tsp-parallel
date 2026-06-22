@@ -25,8 +25,13 @@ struct QLSAParams {
     std::string policy = "epsilon-greedy";
     double epsilon = 0.1;
     double softmax_temperature = 1.0;
+    // current: existing span/action engineering variant.
+    // paper: stateless candidate-leader variant.
+    // paper-sb: candidate-leader variant with diversity state.
+    std::string variant = "current";
     int state_window = 8;
     double delta_scale = 10.0;
+    double diversity_threshold = 0.5;
     std::vector<QLSAAction> actions;
 };
 

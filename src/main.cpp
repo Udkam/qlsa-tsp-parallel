@@ -37,10 +37,13 @@ struct CliOptions {
     std::string cuda_mode = "chain";
     int cuda_candidates_per_iter = 32;
     std::string cuda_reversal_mode = "serial";
+    std::string cuda_candidate_policy = "best";
     double qlsa_alpha = 0.1;
     double qlsa_gamma = 0.9;
     double qlsa_epsilon = 0.1;
     std::string qlsa_policy = "epsilon-greedy";
+    std::string qlsa_variant = "current";
+    double qlsa_diversity_threshold = 0.5;
 };
 
 void print_usage(const char* program) {
@@ -50,11 +53,14 @@ void print_usage(const char* program) {
         << "       " << program
         << " --qlsa --input data/berlin52.tsp --iterations 1000000 --seed 1 --alpha 0.1 --gamma 0.9 --epsilon 0.1 --policy epsilon-greedy\n"
         << "       " << program
+        << " --qlsa --qlsa_variant paper-sb --input data/berlin52.tsp --iterations 1000000 --seed 1\n"
+        << "       " << program
         << " --input data/berlin52.tsp --parallel omp --chains 8 --threads 4 --iterations 1000000 --seed 1\n"
         << "       " << program
         << " --input data/berlin52.tsp --qlsa --parallel cuda --chains 32 --cuda_block_size 128 --iterations 1000000 --seed 1\n";
     std::cerr
-        << "CUDA options: --cuda_mode chain|candidate --cuda_candidates_per_iter 32 --cuda_reversal_mode serial|parallel\n";
+        << "CUDA options: --cuda_mode chain|candidate --cuda_candidates_per_iter 32 "
+        << "--cuda_reversal_mode serial|parallel --cuda_candidate_policy best|random|hybrid\n";
 }
 
 CliOptions parse_args(int argc, char** argv) {
@@ -100,6 +106,8 @@ CliOptions parse_args(int argc, char** argv) {
             options.cuda_candidates_per_iter = std::stoi(require_value(arg));
         } else if (arg == "--cuda_reversal_mode") {
             options.cuda_reversal_mode = require_value(arg);
+        } else if (arg == "--cuda_candidate_policy") {
+            options.cuda_candidate_policy = require_value(arg);
         } else if (arg == "--alpha") {
             options.qlsa_alpha = std::stod(require_value(arg));
         } else if (arg == "--gamma") {
@@ -108,6 +116,10 @@ CliOptions parse_args(int argc, char** argv) {
             options.qlsa_epsilon = std::stod(require_value(arg));
         } else if (arg == "--policy") {
             options.qlsa_policy = require_value(arg);
+        } else if (arg == "--qlsa_variant") {
+            options.qlsa_variant = require_value(arg);
+        } else if (arg == "--diversity_threshold") {
+            options.qlsa_diversity_threshold = std::stod(require_value(arg));
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             std::exit(0);
@@ -152,6 +164,10 @@ CliOptions parse_args(int argc, char** argv) {
     if (options.cuda_reversal_mode != "serial" && options.cuda_reversal_mode != "parallel") {
         throw std::invalid_argument("--cuda_reversal_mode must be serial or parallel");
     }
+    if (options.cuda_candidate_policy != "best" && options.cuda_candidate_policy != "random" &&
+        options.cuda_candidate_policy != "hybrid") {
+        throw std::invalid_argument("--cuda_candidate_policy must be best, random, or hybrid");
+    }
     if (options.qlsa_alpha <= 0.0 || options.qlsa_alpha > 1.0) {
         throw std::invalid_argument("--alpha must be in (0, 1]");
     }
@@ -163,6 +179,16 @@ CliOptions parse_args(int argc, char** argv) {
     }
     if (options.qlsa_policy != "epsilon-greedy" && options.qlsa_policy != "softmax") {
         throw std::invalid_argument("--policy must be epsilon-greedy or softmax");
+    }
+    if (options.qlsa_variant != "current" && options.qlsa_variant != "paper" &&
+        options.qlsa_variant != "paper-sb") {
+        throw std::invalid_argument("--qlsa_variant must be current, paper, or paper-sb");
+    }
+    if (options.qlsa_diversity_threshold < 0.0 || options.qlsa_diversity_threshold > 1.0) {
+        throw std::invalid_argument("--diversity_threshold must be in [0, 1]");
+    }
+    if (options.parallel == "cuda" && options.use_qlsa && options.qlsa_variant != "current") {
+        throw std::invalid_argument("CUDA QLSA currently supports --qlsa_variant current only");
     }
     return options;
 }
@@ -193,8 +219,14 @@ struct RunRow {
 };
 
 std::string algorithm_label(const CliOptions& options) {
-    const std::string base = options.use_qlsa ? "qlsa" : "sa";
+    std::string base = options.use_qlsa ? "qlsa" : "sa";
+    if (options.use_qlsa && options.qlsa_variant != "current") {
+        base += "-" + options.qlsa_variant;
+    }
     if (options.parallel == "cuda") {
+        if (options.cuda_mode == "candidate" && options.cuda_candidate_policy != "best") {
+            return base + "-cuda-candidate-" + options.cuda_candidate_policy;
+        }
         return base + "-cuda-" + options.cuda_mode;
     }
     if (options.parallel == "omp") {
@@ -233,6 +265,8 @@ tsp::QLSAParams make_qlsa_params(const CliOptions& options, const tsp::SAParams&
     params.gamma = options.qlsa_gamma;
     params.epsilon = options.qlsa_epsilon;
     params.policy = options.qlsa_policy;
+    params.variant = options.qlsa_variant;
+    params.diversity_threshold = options.qlsa_diversity_threshold;
     return params;
 }
 
@@ -334,14 +368,17 @@ int main(int argc, char** argv) {
                 std::cout << " cuda_block_size=" << options.cuda_block_size;
                 std::cout << " cuda_mode=" << options.cuda_mode
                           << " cuda_candidates_per_iter=" << options.cuda_candidates_per_iter
-                          << " cuda_reversal_mode=" << options.cuda_reversal_mode;
+                          << " cuda_reversal_mode=" << options.cuda_reversal_mode
+                          << " cuda_candidate_policy=" << options.cuda_candidate_policy;
             }
             std::cout << '\n';
             if (options.use_qlsa) {
                 std::cout << "QLSA params: alpha=" << options.qlsa_alpha
                           << " gamma=" << options.qlsa_gamma
                           << " epsilon=" << options.qlsa_epsilon
-                          << " policy=" << options.qlsa_policy << '\n';
+                          << " policy=" << options.qlsa_policy
+                          << " variant=" << options.qlsa_variant
+                          << " diversity_threshold=" << options.qlsa_diversity_threshold << '\n';
             }
             std::cout << "CSV: algorithm,instance,dimension,iterations,seed,init,chains,threads,parallel,best_length,final_length,elapsed_ms,accepted_moves,improved_moves\n";
         }
@@ -373,6 +410,13 @@ int main(int argc, char** argv) {
                 parallel_params.cuda_reversal_mode = (options.cuda_reversal_mode == "parallel")
                                                         ? tsp::CudaReversalMode::Parallel
                                                         : tsp::CudaReversalMode::Serial;
+                if (options.cuda_candidate_policy == "random") {
+                    parallel_params.cuda_candidate_policy = tsp::CudaCandidatePolicy::Random;
+                } else if (options.cuda_candidate_policy == "hybrid") {
+                    parallel_params.cuda_candidate_policy = tsp::CudaCandidatePolicy::Hybrid;
+                } else {
+                    parallel_params.cuda_candidate_policy = tsp::CudaCandidatePolicy::Best;
+                }
                 parallel_params.base_seed = run_seed;
 
                 const tsp::ParallelResult result = tsp::run_parallel_chains(dm, parallel_params);

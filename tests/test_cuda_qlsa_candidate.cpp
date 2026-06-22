@@ -68,6 +68,26 @@ int main() {
     const tsp::ParallelResult parallel_result = tsp::run_parallel_chains(dm, parallel);
     assert_valid_square4(dm, parallel_result);
 
+    tsp::ParallelParams random = serial;
+    random.cuda_candidate_policy = tsp::CudaCandidatePolicy::Random;
+    const tsp::ParallelResult random_result = tsp::run_parallel_chains(dm, random);
+    assert_valid_square4(dm, random_result);
+
+    tsp::ParallelParams random_parallel = parallel;
+    random_parallel.cuda_candidate_policy = tsp::CudaCandidatePolicy::Random;
+    const tsp::ParallelResult random_parallel_result = tsp::run_parallel_chains(dm, random_parallel);
+    assert_valid_square4(dm, random_parallel_result);
+
+    tsp::ParallelParams hybrid = serial;
+    hybrid.cuda_candidate_policy = tsp::CudaCandidatePolicy::Hybrid;
+    const tsp::ParallelResult hybrid_result = tsp::run_parallel_chains(dm, hybrid);
+    assert_valid_square4(dm, hybrid_result);
+
+    tsp::ParallelParams hybrid_parallel = parallel;
+    hybrid_parallel.cuda_candidate_policy = tsp::CudaCandidatePolicy::Hybrid;
+    const tsp::ParallelResult hybrid_parallel_result = tsp::run_parallel_chains(dm, hybrid_parallel);
+    assert_valid_square4(dm, hybrid_parallel_result);
+
     std::cout << "test_cuda_qlsa_candidate passed\n";
     return 0;
 }

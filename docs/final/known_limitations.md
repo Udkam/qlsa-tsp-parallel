@@ -10,17 +10,17 @@
 
 ## 2. CUDA 后端的边界
 
-CUDA chain mode、SA/QLSA candidate mode 和 parallel reversal 已完成，并能通过测试。candidate mode 使用 block 内线程并行评价多个 2-opt 候选 move，提高了 GPU 内部计算密度，也在部分实例上改善了解质量。
+CUDA chain mode、SA/QLSA candidate mode、candidate policy 和 parallel reversal 已完成，并能通过测试。candidate mode 使用 block 内线程并行评价多个 2-opt 候选 move，提高了 GPU 内部计算密度，也在部分实例上改善了解质量。candidate policy 当前支持 `best`、`random` 和 `hybrid`：`best` 选择候选批中的最小 delta，`random` 按可复现随机方式从候选批中选择一个候选，`hybrid` 在两者之间交替。
 
 该模式不是默认后端，也不等同于原始 SA 的单候选 proposal。由于每轮 proposal 从单候选变为 batch candidate proposal，报告中必须单独标记为 CUDA candidate-level evaluation。
 
-当前实验不支持“CUDA 比 OpenMP 更快”的结论。candidate mode 在小中规模实例上仍受同步、shared memory reduction、tour reversal、global memory 和 kernel overhead 限制。CUDA 可写为工程扩展、质量探索和后续优化方向，不应写成主性能结果。
+当前实验不支持“CUDA 比 OpenMP 更快”的结论。candidate mode 在小中规模实例上仍受同步、shared memory reduction、tour reversal、global memory 和 kernel overhead 限制。`random` 和 `hybrid` policy 能提供候选选择策略对照，但没有改变 CUDA 的整体定位。CUDA 可写为工程扩展、质量探索和后续优化方向，不应写成主性能结果。
 
 ## 3. QLSA 与论文 SB-QLSA 的差异
 
-C++ 主线实现了 QLSA 的工程化版本，支持状态/动作离散化、Q table、epsilon-greedy、softmax，以及 CUDA QLSA candidate 路径。Python reference 用于对照论文 candidate-leader / diversity-state 思想。
+C++ 主线实现了 QLSA 的工程化版本，支持状态/动作离散化、Q table、epsilon-greedy、softmax，以及 CUDA QLSA candidate 路径。本轮新增了可选 `--qlsa_variant paper` 和 `--qlsa_variant paper-sb`：前者实现 candidate-leader 选择，后者在 candidate-leader 上加入基于 Hamming 距离的 diversity state。
 
-不能声称 C++ 主线完整复刻了论文 SB-QLSA。尤其是论文中的 candidate-leader 机制和 diversity-state 机制没有作为 C++ 主实验的等价实现来报告。
+不能把历史 Step 5/6 主实验改写成 paper-sb 结果。已有默认参数、调优和定向增强结论仍主要来自 `current` 变体；paper / paper-sb 是机制对齐入口，需要单独实验和参数调优后才能进入主结论。CUDA QLSA 当前仍只支持 `--qlsa_variant current`。
 
 QLSA 在 rat99 等部分实例上显示出更好的解质量，但不能写成 QLSA 总是优于 SA。
 

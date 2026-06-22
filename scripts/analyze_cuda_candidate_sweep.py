@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Analyze CUDA candidate parameter sweep results."""
 
@@ -27,6 +27,7 @@ HEADER = [
     "algorithm",
     "cuda_mode",
     "cuda_reversal_mode",
+    "cuda_candidate_policy",
     "chains",
     "cuda_block_size",
     "cuda_candidates_per_iter",
@@ -75,6 +76,7 @@ def summarize(rows: list[dict[str, str]]) -> list[dict[str, str]]:
             row["algorithm"],
             row.get("cuda_mode", "candidate"),
             row.get("cuda_reversal_mode", "serial"),
+            row.get("cuda_candidate_policy") or "best",
             row["chains"],
             row["cuda_block_size"],
             row["cuda_candidates_per_iter"],
@@ -84,7 +86,7 @@ def summarize(rows: list[dict[str, str]]) -> list[dict[str, str]]:
 
     out: list[dict[str, str]] = []
     for key, items in groups.items():
-        instance, dimension, algorithm, mode, reversal, chains, block_size, candidates, iterations = key
+        instance, dimension, algorithm, mode, reversal, candidate_policy, chains, block_size, candidates, iterations = key
         lengths = [int(r["best_length"]) for r in items]
         elapsed = [float(r["elapsed_ms"]) for r in items]
         accepted = [float(r["accepted_moves"]) for r in items]
@@ -98,6 +100,7 @@ def summarize(rows: list[dict[str, str]]) -> list[dict[str, str]]:
             "algorithm": algorithm,
             "cuda_mode": mode,
             "cuda_reversal_mode": reversal,
+            "cuda_candidate_policy": candidate_policy,
             "chains": chains,
             "cuda_block_size": block_size,
             "cuda_candidates_per_iter": candidates,
@@ -117,6 +120,7 @@ def summarize(rows: list[dict[str, str]]) -> list[dict[str, str]]:
             r["instance"],
             r["algorithm"],
             r["cuda_reversal_mode"],
+            r["cuda_candidate_policy"],
             int(r["cuda_block_size"]),
             int(r["cuda_candidates_per_iter"]),
         ),
@@ -150,12 +154,12 @@ def write_markdown(path: Path, rows: list[dict[str, str]]) -> None:
         "",
         "## 最佳质量配置",
         "",
-        "| instance | algorithm | reversal | block | candidates | best | Gap (%) | mean ms | runs |",
-        "|---|---|---|---:|---:|---:|---:|---:|---:|",
+        "| instance | algorithm | reversal | policy | block | candidates | best | Gap (%) | mean ms | runs |",
+        "|---|---|---|---|---:|---:|---:|---:|---:|---:|",
     ]
     for row in best_rows(rows):
         lines.append(
-            f"| {row['instance']} | {row['algorithm']} | {row['cuda_reversal_mode']} | "
+            f"| {row['instance']} | {row['algorithm']} | {row['cuda_reversal_mode']} | {row['cuda_candidate_policy']} | "
             f"{row['cuda_block_size']} | {row['cuda_candidates_per_iter']} | "
             f"{row['best_length_min']} | {row['gap_min_percent']} | {row['elapsed_ms_mean']} | {row['runs']} |"
         )
@@ -164,6 +168,7 @@ def write_markdown(path: Path, rows: list[dict[str, str]]) -> None:
         "## 解释边界",
         "",
         "- candidate 数量增加通常会提高每轮搜索覆盖率，但也增加 block 内同步、shared memory reduction 和 reversal 开销。",
+        "- best policy 更偏向批量择优，random policy 更接近单候选随机提案语义，hybrid policy 在二者之间交替，可用于判断质量提升是否主要来自批量择优。",
         "- parallel reversal 是显式 opt-in 模式，只有在同一实例和同一预算下实际更快时，才可写为优化收益。",
         "- 当前实验用于质量-时间折中分析，不能写成 CUDA 是主性能后端。",
     ]
@@ -185,7 +190,7 @@ def write_figure(path: Path, rows: list[dict[str, str]]) -> None:
         })
 
         chosen = best_rows(rows)
-        labels = [f"{r['instance']}\n{r['algorithm'].split('-')[0]}\n{r['cuda_reversal_mode']}" for r in chosen]
+        labels = [f"{r['instance']}\n{r['algorithm'].split('-')[0]}\n{r['cuda_reversal_mode']}\n{r['cuda_candidate_policy']}" for r in chosen]
         times = [float(r["elapsed_ms_mean"]) for r in chosen]
         gaps = [float(r["gap_min_percent"] or "nan") for r in chosen]
 
@@ -195,7 +200,7 @@ def write_figure(path: Path, rows: list[dict[str, str]]) -> None:
         ax1.set_ylabel("平均时间 (ms)")
         ax1.set_xticks(x)
         ax1.set_xticklabels(labels)
-        ax1.grid(axis="y", color="#dddddd", linewidth=0.6)
+        ax1.grid(axis="y", color="#d6e8ff", linewidth=0.6)
 
         ax2 = ax1.twinx()
         ax2.plot(x, gaps, color="#1f77b4", marker="o", linewidth=2.0, label="最小 Gap")

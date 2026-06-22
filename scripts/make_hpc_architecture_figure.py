@@ -13,7 +13,7 @@ COLORS = {
     "openmp": "#1f77b4",
     "cuda": "#d62728",
     "cpu": "#ff7f0e",
-    "paper": "#7f7f7f",
+    "paper": "#4e79a7",
     "line": "#374151",
     "light": "#f8fafc",
 }

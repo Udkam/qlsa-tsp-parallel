@@ -95,6 +95,26 @@ int main() {
     const tsp::ParallelResult parallel_result = tsp::run_parallel_chains(dm, parallel_reversal);
     assert_candidate_result(dm, parallel_result);
 
+    tsp::ParallelParams random_policy = params;
+    random_policy.cuda_candidate_policy = tsp::CudaCandidatePolicy::Random;
+    const tsp::ParallelResult random_result = tsp::run_parallel_chains(dm, random_policy);
+    assert_candidate_result(dm, random_result);
+
+    tsp::ParallelParams random_parallel = random_policy;
+    random_parallel.cuda_reversal_mode = tsp::CudaReversalMode::Parallel;
+    const tsp::ParallelResult random_parallel_result = tsp::run_parallel_chains(dm, random_parallel);
+    assert_candidate_result(dm, random_parallel_result);
+
+    tsp::ParallelParams hybrid_policy = params;
+    hybrid_policy.cuda_candidate_policy = tsp::CudaCandidatePolicy::Hybrid;
+    const tsp::ParallelResult hybrid_result = tsp::run_parallel_chains(dm, hybrid_policy);
+    assert_candidate_result(dm, hybrid_result);
+
+    tsp::ParallelParams hybrid_parallel = hybrid_policy;
+    hybrid_parallel.cuda_reversal_mode = tsp::CudaReversalMode::Parallel;
+    const tsp::ParallelResult hybrid_parallel_result = tsp::run_parallel_chains(dm, hybrid_parallel);
+    assert_candidate_result(dm, hybrid_parallel_result);
+
     tsp::ParallelParams qlsa_candidate = params;
     qlsa_candidate.algorithm = tsp::AlgorithmKind::QLSA;
     const tsp::ParallelResult qlsa_result = tsp::run_parallel_chains(dm, qlsa_candidate);

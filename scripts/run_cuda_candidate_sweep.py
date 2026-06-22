@@ -33,7 +33,14 @@ PROGRAM_HEADER = [
     "accepted_moves",
     "improved_moves",
 ]
-EXTRA_HEADER = ["cuda_mode", "cuda_block_size", "cuda_candidates_per_iter", "cuda_reversal_mode", "log_file"]
+EXTRA_HEADER = [
+    "cuda_mode",
+    "cuda_block_size",
+    "cuda_candidates_per_iter",
+    "cuda_reversal_mode",
+    "cuda_candidate_policy",
+    "log_file",
+]
 
 
 def find_executable() -> Path:
@@ -60,6 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--block-sizes", nargs="+", type=int, default=[64, 128, 256])
     parser.add_argument("--candidates-per-iter", nargs="+", type=int, default=[32, 64, 128, 256])
     parser.add_argument("--reversal-modes", nargs="+", choices=["serial", "parallel"], default=["serial"])
+    parser.add_argument("--candidate-policies", nargs="+", choices=["best", "random", "hybrid"], default=["best"])
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--input-dir", default=str(ROOT / "data"))
     parser.add_argument("--output", default=str(ROOT / "results" / "raw" / "cuda_candidate_sweep_raw.csv"))
@@ -85,6 +93,7 @@ def run_candidate(
     block_size: int,
     candidates: int,
     reversal_mode: str,
+    candidate_policy: str,
     algorithm: str,
     args: argparse.Namespace,
     log_dir: Path,
@@ -103,6 +112,8 @@ def run_candidate(
         str(candidates),
         "--cuda_reversal_mode",
         reversal_mode,
+        "--cuda_candidate_policy",
+        candidate_policy,
         "--chains",
         str(args.chains),
         "--iterations",
@@ -128,7 +139,7 @@ def run_candidate(
             "epsilon-greedy",
         ]
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    log_file = log_dir / f"{input_path.stem}_{algorithm}_candidate_{reversal_mode}_b{block_size}_c{candidates}_{stamp}.log"
+    log_file = log_dir / f"{input_path.stem}_{algorithm}_candidate_{reversal_mode}_{candidate_policy}_b{block_size}_c{candidates}_{stamp}.log"
     print("[run]", " ".join(command))
     completed = subprocess.run(
         command,
@@ -153,6 +164,7 @@ def run_candidate(
         row["cuda_block_size"] = str(block_size)
         row["cuda_candidates_per_iter"] = str(candidates)
         row["cuda_reversal_mode"] = reversal_mode
+        row["cuda_candidate_policy"] = candidate_policy
         row["log_file"] = str(log_file.relative_to(ROOT))
     return rows
 
@@ -186,10 +198,11 @@ def main() -> int:
                     continue
                 for algorithm in args.algorithms:
                     for reversal_mode in args.reversal_modes:
-                        rows.extend(run_candidate(
-                            exe, input_path, block_size, candidates,
-                            reversal_mode, algorithm, args, log_dir
-                        ))
+                        for candidate_policy in args.candidate_policies:
+                            rows.extend(run_candidate(
+                                exe, input_path, block_size, candidates,
+                                reversal_mode, candidate_policy, algorithm, args, log_dir
+                            ))
 
     with output.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=PROGRAM_HEADER + EXTRA_HEADER)

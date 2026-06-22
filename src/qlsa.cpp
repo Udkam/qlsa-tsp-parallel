@@ -30,6 +30,9 @@ void validate_params(const QLSAParams& params) {
     if (params.policy != "epsilon-greedy" && params.policy != "softmax") {
         throw std::invalid_argument("QLSA policy must be epsilon-greedy or softmax");
     }
+    if (params.variant != "current" && params.variant != "paper" && params.variant != "paper-sb") {
+        throw std::invalid_argument("QLSA variant must be current, paper, or paper-sb");
+    }
     if (params.softmax_temperature <= 0.0) {
         throw std::invalid_argument("QLSA softmax_temperature must be positive");
     }
@@ -38,6 +41,9 @@ void validate_params(const QLSAParams& params) {
     }
     if (params.delta_scale <= 0.0) {
         throw std::invalid_argument("QLSA delta_scale must be positive");
+    }
+    if (params.diversity_threshold < 0.0 || params.diversity_threshold > 1.0) {
+        throw std::invalid_argument("QLSA diversity_threshold must be in [0, 1]");
     }
     if (params.sa.iterations < 0) {
         throw std::invalid_argument("iterations must be non-negative");
@@ -122,6 +128,53 @@ int best_action_index(const std::vector<double>& q_values) {
         }
     }
     return best;
+}
+
+Move sample_random_2opt_move(int n, Rng& rng) {
+    if (n < 3) {
+        return Move{};
+    }
+    for (;;) {
+        int i = rng.uniform_int(0, n - 1);
+        int k = rng.uniform_int(0, n - 1);
+        if (i > k) {
+            std::swap(i, k);
+        }
+        if (is_valid_2opt_move(n, i, k)) {
+            return Move{i, k};
+        }
+    }
+}
+
+int apply_one_2opt_metropolis(Tour& tour,
+                              int length,
+                              const DistanceMatrix& dm,
+                              double temperature,
+                              Rng& rng) {
+    const int n = dm.size();
+    if (n < 3) {
+        return length;
+    }
+    const Move move = sample_random_2opt_move(n, rng);
+    const int delta = delta_2opt(tour, dm, move.i, move.k);
+    bool accept = delta <= 0;
+    if (!accept) {
+        accept = rng.uniform01() < std::exp(-static_cast<double>(delta) / std::max(temperature, 1e-12));
+    }
+    if (accept) {
+        apply_2opt(tour, move.i, move.k);
+        return length + delta;
+    }
+    return length;
+}
+
+int diversity_state(const Tour& current, const Tour& best, double threshold) {
+    if (current.empty()) {
+        return 0;
+    }
+    const double diversity =
+        static_cast<double>(hamming_distance(current, best)) / static_cast<double>(current.size());
+    return diversity >= threshold ? 1 : 0;
 }
 
 }  // namespace
@@ -220,8 +273,7 @@ int select_qlsa_action(const std::vector<double>& q_values, const QLSAParams& pa
     throw std::invalid_argument("QLSA policy must be epsilon-greedy or softmax");
 }
 
-QLSAResult run_qlsa_2opt(const DistanceMatrix& dm, const QLSAParams& params) {
-    validate_params(params);
+QLSAResult run_qlsa_current(const DistanceMatrix& dm, const QLSAParams& params) {
     const int n = dm.size();
     if (n <= 0) {
         throw std::invalid_argument("run_qlsa_2opt requires a non-empty distance matrix");
@@ -311,6 +363,132 @@ QLSAResult run_qlsa_2opt(const DistanceMatrix& dm, const QLSAParams& params) {
     result.elapsed_ms = timer.elapsed_ms();
     result.q_table = std::move(q_table);
     return result;
+}
+
+QLSAResult run_qlsa_paper_style(const DistanceMatrix& dm, const QLSAParams& params) {
+    const int n = dm.size();
+    if (n <= 0) {
+        throw std::invalid_argument("run_qlsa_2opt requires a non-empty distance matrix");
+    }
+
+    const int state_count = (params.variant == "paper-sb") ? 2 : 1;
+    constexpr int kCandidateLeaderActionCount = 4;
+    enum CandidateLeaderAction {
+        Current = 0,
+        GlobalBest = 1,
+        Random = 2,
+        DoubleBridge = 3,
+    };
+
+    std::vector<std::vector<double>> q_table(
+        static_cast<size_t>(state_count),
+        std::vector<double>(static_cast<size_t>(kCandidateLeaderActionCount), 0.0));
+
+    Timer timer;
+    Rng rng(params.sa.seed);
+
+    Tour current = params.sa.use_nearest_neighbor_init ? nearest_neighbor_tour(dm) : random_tour(n, rng);
+    int current_length = tour_length(current, dm);
+    Tour best = current;
+    int best_length = current_length;
+
+    QLSAResult result;
+    result.action_counts.assign(static_cast<size_t>(kCandidateLeaderActionCount), 0);
+
+    double temperature = params.sa.initial_temperature;
+    const double temp_decay = (params.sa.iterations > 0)
+                                  ? std::pow(params.sa.final_temperature / params.sa.initial_temperature,
+                                             1.0 / static_cast<double>(params.sa.iterations))
+                                  : 1.0;
+
+    int state = (params.variant == "paper-sb")
+                    ? diversity_state(current, best, params.diversity_threshold)
+                    : 0;
+
+    for (int64_t iter = 0; n >= 3 && iter < params.sa.iterations; ++iter) {
+        const int action_index = select_qlsa_action(q_table[static_cast<size_t>(state)], params, rng);
+        ++result.action_counts[static_cast<size_t>(action_index)];
+
+        Tour leader;
+        int leader_length = 0;
+        switch (action_index) {
+            case Current:
+                leader = current;
+                leader_length = current_length;
+                break;
+            case GlobalBest:
+                leader = best;
+                leader_length = best_length;
+                break;
+            case Random:
+                leader = random_tour(n, rng);
+                leader_length = tour_length(leader, dm);
+                break;
+            case DoubleBridge:
+                leader = double_bridge(current, rng);
+                leader_length = tour_length(leader, dm);
+                break;
+            default:
+                throw std::runtime_error("invalid candidate-leader action");
+        }
+
+        const int previous_length = current_length;
+        const int candidate_length =
+            apply_one_2opt_metropolis(leader, leader_length, dm, temperature, rng);
+        const int total_delta = candidate_length - current_length;
+
+        bool accept = total_delta <= 0;
+        if (!accept) {
+            accept = rng.uniform01() < std::exp(-static_cast<double>(total_delta) /
+                                                std::max(temperature, 1e-12));
+        }
+
+        if (accept) {
+            current = std::move(leader);
+            current_length = candidate_length;
+            ++result.accepted_moves;
+            if (current_length < previous_length) {
+                ++result.improved_moves;
+            }
+            if (current_length < best_length) {
+                best_length = current_length;
+                best = current;
+            }
+        }
+
+        const double reward = std::max(0, previous_length - current_length);
+        const int next_state = (params.variant == "paper-sb")
+                                   ? diversity_state(current, best, params.diversity_threshold)
+                                   : 0;
+        update_q_value(q_table, state, action_index, next_state, reward, params.alpha, params.gamma);
+        state = next_state;
+
+        temperature *= temp_decay;
+    }
+
+    const int checked_best_length = tour_length(best, dm);
+    if (checked_best_length != best_length) {
+        throw std::runtime_error("QLSA paper-style best_length verification failed");
+    }
+    const int checked_final_length = tour_length(current, dm);
+    if (checked_final_length != current_length) {
+        throw std::runtime_error("QLSA paper-style final_length verification failed");
+    }
+
+    result.best_tour = std::move(best);
+    result.best_length = best_length;
+    result.final_length = current_length;
+    result.elapsed_ms = timer.elapsed_ms();
+    result.q_table = std::move(q_table);
+    return result;
+}
+
+QLSAResult run_qlsa_2opt(const DistanceMatrix& dm, const QLSAParams& params) {
+    validate_params(params);
+    if (params.variant == "current") {
+        return run_qlsa_current(dm, params);
+    }
+    return run_qlsa_paper_style(dm, params);
 }
 
 }  // namespace tsp

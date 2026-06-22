@@ -21,7 +21,9 @@
 - OpenMP multi-chain
 - CUDA chain mode
 - CUDA candidate-level 2-opt evaluation
+- CUDA candidate policy (`best` / `random` / `hybrid`)
 - CUDA QLSA candidate mode
+- 可选 QLSA 机制对齐变体：`current` / `paper` / `paper-sb`
 - MPI + OpenMP hybrid backend
 - 自动实验脚本、CSV 汇总、图表生成和报告检查脚本
 
@@ -51,10 +53,28 @@ QLSA + OpenMP：
 .\build-cuda-ninja\tsp_sa.exe --qlsa --input data\berlin52.tsp --parallel omp --chains 32 --threads 8 --iterations 1000000 --repeat 3 --seed 1 --init nn --alpha 0.1 --gamma 0.9 --epsilon 0.1 --policy epsilon-greedy
 ```
 
+QLSA candidate-leader / diversity-state 变体：
+
+```powershell
+.\build-cuda-ninja\tsp_sa.exe --qlsa --qlsa_variant paper-sb --input data\berlin52.tsp --iterations 100000 --seed 1 --init nn
+```
+
 CUDA candidate：
 
 ```powershell
 .\build-cuda-ninja\tsp_sa.exe --input data\a280.tsp --parallel cuda --cuda_mode candidate --cuda_candidates_per_iter 128 --cuda_block_size 128 --cuda_reversal_mode parallel --chains 64 --iterations 500000 --seed 1 --init nn
+```
+
+CUDA candidate random policy：
+
+```powershell
+.\build-cuda-ninja\tsp_sa.exe --input data\a280.tsp --parallel cuda --cuda_mode candidate --cuda_candidate_policy random --cuda_candidates_per_iter 128 --cuda_block_size 128 --cuda_reversal_mode parallel --chains 64 --iterations 500000 --seed 1 --init nn
+```
+
+CUDA candidate hybrid policy：
+
+```powershell
+.\build-cuda-ninja\tsp_sa.exe --input data\a280.tsp --parallel cuda --cuda_mode candidate --cuda_candidate_policy hybrid --cuda_candidates_per_iter 128 --cuda_block_size 128 --cuda_reversal_mode parallel --chains 64 --iterations 500000 --seed 1 --init nn
 ```
 
 QLSA CUDA candidate：
@@ -71,6 +91,7 @@ QLSA CUDA candidate：
 - CUDA parallel reversal：`results/summary/cuda_reversal_summary.csv`
 - 大实例 OpenMP：`results/summary/large_openmp_l1_summary.csv`
 - 大实例 CUDA：`results/summary/large_cuda_formal_summary.csv`
+- CUDA hybrid quick：`results/summary/cuda_candidate_hybrid_quick_summary.csv`
 - 双 VM MPI：`results/summary/mpi_vm_scaling_formal_summary.csv`，`results/summary/large_mpi_vm_formal_aggressive_summary.csv`
 - 论文参考数据：`results/reference/paper_table8_runtime.csv`，`results/reference/paper_hard_instance_quality.csv`
 
@@ -78,9 +99,10 @@ QLSA CUDA candidate：
 
 - OpenMP multi-chain 是当前主要性能结论。
 - CUDA candidate-level evaluation 是工程扩展和质量/搜索覆盖率探索，不作为默认主性能后端。
+- CUDA candidate policy 中 `best` 更偏向批量择优，`random` 更接近随机候选提案，`hybrid` 用于观察两者折中；三者都不改变 OpenMP 是主性能结论的定位。
 - MPI + OpenMP 结果来自双 Ubuntu VM 和真实 `mpirun`，用于证明分布式工程链路，不等同生产 HPC benchmark。
 - QLSA 在部分实例上提升解质量，但不能表述为总是优于 SA。
-- C++ 主线没有声称完整复刻论文 SB-QLSA 的 candidate-leader + diversity-state 机制。
+- C++ 已提供可选 `paper` / `paper-sb` 机制对齐变体；已有主实验仍主要使用 `current` 变体，不能把历史结果改写成 paper-sb 结论。
 
 ## 提交前检查
 

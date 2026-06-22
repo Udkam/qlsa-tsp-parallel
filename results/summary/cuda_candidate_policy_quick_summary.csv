@@ -1,0 +1,7 @@
+instance,algorithm_family,cuda_mode,chains,cuda_block_size,cuda_candidates_per_iter,cuda_candidate_policy,iterations,runs,bks,best_length_min,gap_min,elapsed_ms_mean,elapsed_ms_std,speedup_vs_cuda_chain,speedup_vs_openmp_if_available,accepted_moves_mean,improved_moves_mean
+berlin52,qlsa,chain,32,128,64,,100000,1,7542,7542,0.0000,200.1210,0.0000,1.0000,2.0560,334060.0000,152570.0000
+berlin52,qlsa,candidate,32,128,64,best,100000,1,7542,7542,0.0000,459.2310,0.0000,0.4358,0.8959,2840013.0000,150005.0000
+berlin52,qlsa,candidate,32,128,64,random,100000,1,7542,7542,0.0000,269.1920,0.0000,0.7434,1.5284,324775.0000,151495.0000
+berlin52,sa,chain,32,128,64,,100000,1,7542,7542,0.0000,112.7470,0.0000,1.0000,1.7952,302260.0000,148533.0000
+berlin52,sa,candidate,32,128,64,best,100000,1,7542,7542,0.0000,288.3050,0.0000,0.3911,0.7020,1000885.0000,371351.0000
+berlin52,sa,candidate,32,128,64,random,100000,1,7542,7542,0.0000,184.2290,0.0000,0.6120,1.0986,302332.0000,148377.0000

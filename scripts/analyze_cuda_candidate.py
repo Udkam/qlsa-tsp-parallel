@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Analyze CUDA candidate-mode experiments and write summary/markdown/figure."""
 
 from __future__ import annotations
@@ -20,6 +20,24 @@ BKS = {
     "rat99": 1211,
     "eil101": 629,
     "pr76": 108159,
+    "ch130": 6110,
+    "ch150": 6528,
+    "kroA150": 26524,
+    "d198": 15780,
+    "tsp225": 3916,
+    "pr226": 80369,
+    "gil262": 2378,
+    "a280": 2579,
+    "lin318": 42029,
+    "rd400": 15281,
+    "pcb442": 50778,
+    "d493": 35002,
+    "att532": 27686,
+    "u574": 36905,
+    "rat575": 6773,
+    "d657": 48912,
+    "u724": 41910,
+    "rat783": 8806,
 }
 SUMMARY_HEADER = [
     "instance",
@@ -28,6 +46,7 @@ SUMMARY_HEADER = [
     "chains",
     "cuda_block_size",
     "cuda_candidates_per_iter",
+    "cuda_candidate_policy",
     "iterations",
     "runs",
     "bks",
@@ -95,6 +114,7 @@ def summarize(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     for row in rows:
         algorithm = row["algorithm"]
         family = "qlsa" if algorithm.startswith("qlsa") else "sa"
+        candidate_policy = row.get("cuda_candidate_policy") or ("best" if row.get("cuda_mode") == "candidate" else "")
         key = (
             row["instance"],
             family,
@@ -102,6 +122,7 @@ def summarize(rows: list[dict[str, str]]) -> list[dict[str, str]]:
             row["chains"],
             row["cuda_block_size"],
             row["cuda_candidates_per_iter"],
+            candidate_policy,
             row["iterations"],
         )
         groups[key].append(row)
@@ -109,7 +130,7 @@ def summarize(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     openmp_baselines = load_openmp_baselines()
     interim: list[dict[str, object]] = []
     for key, items in groups.items():
-        instance, family, mode, chains, block_size, candidates, iterations = key
+        instance, family, mode, chains, block_size, candidates, candidate_policy, iterations = key
         lengths = [int(r["best_length"]) for r in items]
         elapsed = [float(r["elapsed_ms"]) for r in items]
         accepted = [float(r["accepted_moves"]) for r in items]
@@ -126,6 +147,7 @@ def summarize(rows: list[dict[str, str]]) -> list[dict[str, str]]:
             "chains": int(chains),
             "cuda_block_size": int(block_size),
             "cuda_candidates_per_iter": int(candidates),
+            "cuda_candidate_policy": candidate_policy,
             "iterations": int(iterations),
             "runs": len(items),
             "bks": "" if bks is None else bks,
@@ -178,12 +200,12 @@ def write_markdown(path: Path, rows: list[dict[str, str]]) -> None:
         "",
         "本实验比较 CUDA chain mode 与新增 candidate mode。candidate mode 使用 one block per chain、block 内线程并行评价多个 2-opt 候选 move，并在 shared memory 中做最小 delta 归约。该模式改变了单步 proposal：它是 batch proposal 变体，不等同于原始 SA 的单候选采样。",
         "",
-        "| instance | family | mode | chains | block | candidates | runs | best | gap | mean ms | speedup vs chain |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| instance | family | mode | policy | chains | block | candidates | runs | best | gap | mean ms | speedup vs chain |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for r in rows:
         lines.append(
-            f"| {r['instance']} | {r['algorithm_family']} | {r['cuda_mode']} | {r['chains']} | "
+            f"| {r['instance']} | {r['algorithm_family']} | {r['cuda_mode']} | {r['cuda_candidate_policy']} | {r['chains']} | "
             f"{r['cuda_block_size']} | {r['cuda_candidates_per_iter']} | {r['runs']} | "
             f"{r['best_length_min']} | {r['gap_min']} | {r['elapsed_ms_mean']} | {r['speedup_vs_cuda_chain']} |"
         )
@@ -192,8 +214,9 @@ def write_markdown(path: Path, rows: list[dict[str, str]]) -> None:
         "## 结论边界",
         "",
         "- SA CUDA candidate mode 已验证为可运行路径，并保留 chain mode 作为默认兼容模式。",
+        "- `best` policy 在每轮候选中选最小 delta，`random` policy 从候选批中按可复现随机方式选一个候选，`hybrid` policy 在 best/random 之间交替，用于比较批量择优、随机提案和组合策略。",
         "- 若 speedup_vs_cuda_chain 小于 1，说明 batch candidate evaluation 在该实例/预算下没有抵消 reduction、shared memory 同步和 thread 0 reversal 的开销。",
-        "- QLSA candidate mode 当前未接入主线实验；报告中不能写 QLSA candidate 已完成。",
+        "- SA/QLSA candidate mode 均已接入主线 CUDA 后端，但仍应标记为 batch proposal 变体。",
         "- 本实验不改变 OpenMP 作为主性能结论的定位。",
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -219,19 +242,32 @@ def write_figure(path: Path, rows: list[dict[str, str]]) -> None:
         ]
         plt.rcParams["axes.unicode_minus"] = False
 
-        mode_name = {"chain": "链模式", "candidate": "候选模式"}
-        labels = [f"{r['instance']}\n{mode_name.get(r['cuda_mode'], r['cuda_mode'])}\nblock={r['cuda_block_size']}, cand={r['cuda_candidates_per_iter']}" for r in sa_rows]
-        values = [float(r["elapsed_ms_mean"]) for r in sa_rows]
-        colors = ["#7f7f7f" if r["cuda_mode"] == "chain" else "#d62728" for r in sa_rows]
-        fig, ax = plt.subplots(figsize=(max(7.0, len(labels) * 0.8), 4.2), dpi=220)
-        ax.bar(range(len(values)), values, color=colors)
-        ax.set_title("CUDA 链模式与候选模式用时对比", fontsize=12)
+        instances = sorted({r["instance"] for r in sa_rows})
+        series = [
+            ("链模式", "#2ca02c", lambda r: r["cuda_mode"] == "chain"),
+            ("best 候选", "#d62728", lambda r: r["cuda_mode"] == "candidate" and r.get("cuda_candidate_policy") == "best"),
+            ("random 候选", "#ff7f0e", lambda r: r["cuda_mode"] == "candidate" and r.get("cuda_candidate_policy") == "random"),
+            ("hybrid 候选", "#9467bd", lambda r: r["cuda_mode"] == "candidate" and r.get("cuda_candidate_policy") == "hybrid"),
+        ]
+        x = list(range(len(instances)))
+        width = 0.20
+        fig, ax = plt.subplots(figsize=(8.8, 4.6), dpi=220)
+        for offset, (label, color, pred) in enumerate(series):
+            values = []
+            for inst in instances:
+                hit = [r for r in sa_rows if r["instance"] == inst and pred(r)]
+                values.append(float(hit[0]["elapsed_ms_mean"]) if hit else math.nan)
+            positions = [i + (offset - 1.5) * width for i in x]
+            ax.bar(positions, values, width, color=color, label=label)
+            for pos, value in zip(positions, values):
+                if not math.isnan(value):
+                    ax.text(pos, value, f"{value:.0f}", ha="center", va="bottom", fontsize=8)
+        ax.set_title("CUDA SA 候选策略用时对比", fontsize=12)
         ax.set_ylabel("平均用时 (ms)")
-        ax.set_xticks(range(len(labels)))
-        ax.set_xticklabels(labels, fontsize=8)
-        ax.grid(axis="y", color="#dddddd", linewidth=0.6)
-        for idx, value in enumerate(values):
-            ax.text(idx, value, f"{value:.1f}", ha="center", va="bottom", fontsize=8)
+        ax.set_xticks(x)
+        ax.set_xticklabels(instances)
+        ax.grid(axis="y", color="#d6e8ff", linewidth=0.6)
+        ax.legend(frameon=False, ncol=4)
         fig.tight_layout()
         fig.savefig(path)
         plt.close(fig)
@@ -245,7 +281,14 @@ def write_figure(path: Path, rows: list[dict[str, str]]) -> None:
             x = 40 + idx * 80
             h = 300 * value / max_v if max_v else 0
             y = 360 - h
-            color = "#7f7f7f" if r["cuda_mode"] == "chain" else "#d62728"
+            if r["cuda_mode"] == "chain":
+                color = "#2ca02c"
+            elif r.get("cuda_candidate_policy") == "random":
+                color = "#ff7f0e"
+            elif r.get("cuda_candidate_policy") == "hybrid":
+                color = "#9467bd"
+            else:
+                color = "#d62728"
             svg.append(f"<rect x='{x}' y='{y:.1f}' width='45' height='{h:.1f}' fill='{color}'/>")
             svg.append(f"<text x='{x}' y='385' font-size='10'>{r['instance']}</text>")
             svg.append(f"<text x='{x}' y='400' font-size='10'>{r['cuda_mode']}</text>")

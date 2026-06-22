@@ -32,7 +32,14 @@ PROGRAM_HEADER = [
     "accepted_moves",
     "improved_moves",
 ]
-EXTRA_HEADER = ["cuda_mode", "cuda_block_size", "cuda_candidates_per_iter", "cuda_reversal_mode", "log_file"]
+EXTRA_HEADER = [
+    "cuda_mode",
+    "cuda_block_size",
+    "cuda_candidates_per_iter",
+    "cuda_reversal_mode",
+    "cuda_candidate_policy",
+    "log_file",
+]
 
 
 def find_executable() -> Path:
@@ -59,6 +66,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--block-sizes", nargs="+", type=int, default=[128, 256])
     parser.add_argument("--candidates-per-iter", nargs="+", type=int, default=[64, 128])
     parser.add_argument("--reversal-modes", nargs="+", choices=["serial", "parallel"], default=["serial"])
+    parser.add_argument("--candidate-policies", nargs="+", choices=["best", "random", "hybrid"], default=["best"])
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--input-dir", default=str(ROOT / "data"))
     parser.add_argument("--output", default=str(ROOT / "results" / "raw" / "cuda_candidate_raw.csv"))
@@ -84,6 +92,7 @@ def run_one(exe: Path,
             block_size: int,
             candidates: int,
             reversal_mode: str,
+            candidate_policy: str,
             algorithm: str,
             args: argparse.Namespace,
             log_dir: Path) -> list[dict[str, str]]:
@@ -101,6 +110,8 @@ def run_one(exe: Path,
         str(candidates),
         "--cuda_reversal_mode",
         reversal_mode,
+        "--cuda_candidate_policy",
+        candidate_policy,
         "--chains",
         str(args.chains),
         "--iterations",
@@ -126,7 +137,7 @@ def run_one(exe: Path,
             "epsilon-greedy",
         ]
     timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    log_file = log_dir / f"{input_path.stem}_{algorithm}_{mode}_{reversal_mode}_b{block_size}_c{candidates}_{timestamp}.log"
+    log_file = log_dir / f"{input_path.stem}_{algorithm}_{mode}_{reversal_mode}_{candidate_policy}_b{block_size}_c{candidates}_{timestamp}.log"
     print("[run]", " ".join(command))
     completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, encoding="utf-8", errors="replace")
     log_file.write_text(
@@ -146,6 +157,7 @@ def run_one(exe: Path,
         row["cuda_block_size"] = str(block_size)
         row["cuda_candidates_per_iter"] = str(candidates)
         row["cuda_reversal_mode"] = reversal_mode
+        row["cuda_candidate_policy"] = candidate_policy if mode == "candidate" else ""
         row["log_file"] = str(log_file.relative_to(ROOT))
     return rows
 
@@ -160,6 +172,7 @@ def main() -> int:
         args.block_sizes = [128]
         args.candidates_per_iter = [128]
         args.reversal_modes = ["serial"]
+        args.candidate_policies = ["best"]
 
     exe = find_executable()
     output = Path(args.output)
@@ -185,9 +198,13 @@ def main() -> int:
                     print(f"[warning] skipped candidates_per_iter={candidates} > block_size={block_size}")
                     continue
                 for algorithm in args.algorithms:
-                    all_rows.extend(run_one(exe, input_path, "chain", block_size, candidates, "serial", algorithm, args, log_dir))
+                    all_rows.extend(run_one(exe, input_path, "chain", block_size, candidates, "serial", "best", algorithm, args, log_dir))
                     for reversal_mode in args.reversal_modes:
-                        all_rows.extend(run_one(exe, input_path, "candidate", block_size, candidates, reversal_mode, algorithm, args, log_dir))
+                        for candidate_policy in args.candidate_policies:
+                            all_rows.extend(run_one(
+                                exe, input_path, "candidate", block_size, candidates,
+                                reversal_mode, candidate_policy, algorithm, args, log_dir
+                            ))
 
     with output.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=PROGRAM_HEADER + EXTRA_HEADER)

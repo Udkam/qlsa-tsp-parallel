@@ -24,6 +24,12 @@ enum class CudaReversalMode {
     Parallel,
 };
 
+enum class CudaCandidatePolicy {
+    Best,
+    Random,
+    Hybrid,
+};
+
 struct ParallelParams {
     AlgorithmKind algorithm = AlgorithmKind::SA;
 
@@ -37,6 +43,7 @@ struct ParallelParams {
     CudaMode cuda_mode = CudaMode::Chain;
     int cuda_candidates_per_iter = 32;
     CudaReversalMode cuda_reversal_mode = CudaReversalMode::Serial;
+    CudaCandidatePolicy cuda_candidate_policy = CudaCandidatePolicy::Best;
     uint64_t base_seed = 1;
 };
 

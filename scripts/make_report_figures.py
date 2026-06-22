@@ -35,7 +35,7 @@ COLORS = {
     "qlsa": "#ff7f0e",
     "openmp": "#2ca02c",
     "cuda": "#d62728",
-    "paper": "#7f7f7f",
+    "paper": "#4e79a7",
     "muted": "#9ca3af",
     "light": "#e5e7eb",
 }
@@ -225,10 +225,10 @@ def fig01_architecture(plt, FancyArrowPatch, FancyBboxPatch) -> None:
 
     # Unified palette: layer -> (facecolor, edgecolor).
     pal = {
-        "input": ("#eef2f7", "#64748b"),   # blue-gray input layer
+        "input": ("#e6f0ff", "#1f77b4"),
         "core": ("#dbeafe", "#3b82f6"),    # light blue core data layer
         "algo": ("#ffedd5", "#f97316"),    # light orange algorithm layer
-        "serial": ("#e5e7eb", "#6b7280"),  # gray serial backend
+        "serial": ("#e8f5e9", "#2ca02c"),
         "openmp": ("#dcfce7", "#22c55e"),  # green OpenMP backend
         "cuda": ("#fee2e2", "#ef4444"),    # red CUDA backend
         "output": ("#ede9fe", "#8b5cf6"),  # light purple output layer

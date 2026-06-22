@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Analyze CUDA candidate serial-vs-parallel reversal results."""
 
@@ -152,12 +152,12 @@ def write_figure(path: Path, rows: list[dict[str, str]]) -> None:
         speedups = [float(r["parallel_speedup_vs_serial"]) for r in rows]
         fig, ax = plt.subplots(figsize=(8.6, 4.2), dpi=300)
         ax.bar(range(len(labels)), speedups, color="#d62728", alpha=0.82)
-        ax.axhline(1.0, color="#7f7f7f", linestyle="--", linewidth=1.0)
+        ax.axhline(1.0, color="#1f77b4", linestyle="--", linewidth=1.0)
         ax.set_xticks(range(len(labels)))
         ax.set_xticklabels(labels)
         ax.set_ylabel("parallel / serial reversal speedup")
         ax.set_title("CUDA parallel reversal 相对 serial reversal")
-        ax.grid(axis="y", color="#dddddd", linewidth=0.6)
+        ax.grid(axis="y", color="#d6e8ff", linewidth=0.6)
         fig.tight_layout()
         fig.savefig(path)
         plt.close(fig)

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Analyze SA/QLSA CUDA candidate and reversal-mode experiments."""
 
@@ -168,7 +168,7 @@ def write_figure(path: Path, rows: list[dict[str, str]]) -> None:
         ax1.set_ylabel("平均时间 (ms)")
         ax1.set_xticks(x)
         ax1.set_xticklabels(labels, rotation=25, ha="right")
-        ax1.grid(axis="y", color="#dddddd", linewidth=0.6)
+        ax1.grid(axis="y", color="#d6e8ff", linewidth=0.6)
         ax2 = ax1.twinx()
         ax2.plot(x, gaps, color="#ff7f0e", marker="o", linewidth=2.0, label="最小 Gap")
         ax2.set_ylabel("最小 Gap (%)")

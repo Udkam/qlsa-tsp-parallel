@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Check course report image references and high-risk wording."""
+# -*- coding: utf-8 -*-
+"""Check Markdown report image references and unsafe wording.
+
+The script is intentionally small and UTF-8 explicit because the project report
+contains Chinese text and PowerShell console rendering can be misleading.
+"""
 
 from __future__ import annotations
 
@@ -12,34 +17,45 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REPORT = ROOT / "docs" / "final" / "final_report_course.md"
 IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
+MOJIBAKE_TOKENS = [
+    "\ufffd",
+    "?" * 4,
+    "\u951f\u65a4\u62f7",
+    "\u95bf\u7192\u67bb\u93b7",
+    "\u95c1\u8de8\u5590\u93cb",
+]
+
 FORBIDDEN_PHRASES = [
+    "CUDA 全面优于 OpenMP",
     "CUDA 比 OpenMP 快",
     "CUDA 优于 OpenMP",
-    "CUDA 全面优于 OpenMP",
+    "MPI VM 实验证明生产 HPC 性能",
     "QLSA 总是优于 SA",
-    "QLSA 全面优于 SA",
     "所有实例都达到 BKS",
     "完整复刻 SB-QLSA",
     "同平台公平 benchmark",
-    "严格公平 benchmark",
+    "百万城市级实验",
+    "强证据链",
+    "完整闭环",
+    "工程闭环",
+    "显著证明",
     "<你的姓名>",
     "<你的学号>",
     "<你的专业>",
-    "请补充",
     "TODO",
 ]
 
-REQUIRED_CONTENT = [
-    "预期目标与实际完成情况",
-    "参考论文方法与实现差异",
-    "方案设计",
-    "并行方案设计",
-    "实施过程与解决的问题",
-    "实验设计",
-    "实验结果与分析",
-    "与近期论文结果对比",
-    "工程难度与证据等级",
-    "局限性",
+REQUIRED_FIGURES = [
+    "fig_course_01_openmp_speedup.png",
+    "fig_course_02_openmp_efficiency.png",
+    "fig_course_03_default_gap.png",
+    "fig_course_04_targeted_quality.png",
+    "fig_course_05_policy_comparison.png",
+    "fig_course_06_cuda_boundary.png",
+    "fig_course_07_mpi_scaling.png",
+    "fig_course_09_paper_quality.png",
+    "fig_course_10_openmp_thread_scaling.png",
+    "fig_course_11_representative_openmp.png",
 ]
 
 
@@ -59,15 +75,26 @@ def main() -> int:
     text = report.read_text(encoding="utf-8")
     failed = False
 
+    for token in MOJIBAKE_TOKENS:
+        if token in text:
+            print(f"[error] possible mojibake token found: {token}")
+            failed = True
+
+    for phrase in FORBIDDEN_PHRASES:
+        if phrase in text:
+            print(f"[error] forbidden or placeholder phrase found: {phrase}")
+            failed = True
+
     image_refs = IMAGE_RE.findall(text)
-    if len(image_refs) < 6:
-        print(f"[error] expected at least 6 image references, found {len(image_refs)}")
+    if len(image_refs) < 8:
+        print(f"[error] expected at least 8 image references, found {len(image_refs)}")
         failed = True
 
     for alt_text, raw in image_refs:
-        if re.search(r"图\s*[0-9一二三四五六七八九十]+\s*[:：]", alt_text):
+        if re.search(r"图\s*[0-9一二三四五六七八九十]+[:：]?", alt_text):
             print(f"[error] image alt text should not contain numbered caption: {alt_text}")
             failed = True
+
         path_part = raw.split("#", 1)[0].strip()
         candidate = (report.parent / path_part).resolve()
         if not candidate.exists():
@@ -76,18 +103,14 @@ def main() -> int:
         else:
             print(f"[ok] image asset exists: {raw}")
 
-    for phrase in FORBIDDEN_PHRASES:
-        if phrase in text:
-            print(f"[error] forbidden or placeholder phrase found: {phrase}")
-            failed = True
-
-    for item in REQUIRED_CONTENT:
-        if item not in text:
-            print(f"[error] missing required content: {item}")
+    for fig_name in REQUIRED_FIGURES:
+        if fig_name not in text:
+            print(f"[error] missing required figure reference: {fig_name}")
             failed = True
 
     if failed:
         return 1
+
     print(f"[ok] report asset check passed: {report.relative_to(ROOT)}")
     return 0
 

@@ -137,7 +137,7 @@ def make_figure(summary: list[dict[str, str]], path: Path) -> None:
 
     labels = [f"{r['instance']}-{r['cuda_mode']}" for r in summary]
     times = [float(r["elapsed_ms_mean"]) / 1000.0 for r in summary]
-    colors = ["#d62728" if r["cuda_mode"] == "candidate" else "#7f7f7f" for r in summary]
+    colors = ["#d62728" if r["cuda_mode"] == "candidate" else "#2ca02c" for r in summary]
     ax.bar(labels, times, color=colors)
     ax.set_title("大实例 CUDA chain 与 candidate 用时")
     ax.set_ylabel("运行时间（秒）")

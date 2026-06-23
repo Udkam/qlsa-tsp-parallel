@@ -1,6 +1,11 @@
 # Parallel TSP SA/QLSA
 
-本仓库是并行算法课程大作业工程，主题为“面向旅行推销员问题的 Q-Learning 辅助模拟退火算法并行化实现与性能优化”。项目以 TSP 为应用背景，实现了 SA、QLSA、OpenMP 多搜索链并行、CUDA 后端和 MPI + OpenMP 双虚拟机分布式实验。
+本仓库是并行算法课程大作业工程。项目以 TSP 为应用背景，实现了 SA、QLSA、OpenMP 多搜索链并行、CUDA 后端和 MPI + OpenMP 双虚拟机分布式实验。
+
+- 复现实验命令：`docs/final/reproduction_commands.md`
+- 局限性说明：`docs/final/known_limitations.md`
+- 关键结果索引：`results/final/RESULTS_INDEX.md`
+- 报告图片：`figures/`
 
 ## 工程内容
 

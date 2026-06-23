@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = [
     ROOT / "README.md",
-    ROOT / "docs" / "final" / "final_report_course.md",
+    ROOT / "docs" / "final" / "report.md",
     ROOT / "docs" / "final" / "personal_report.md",
     ROOT / "docs" / "final" / "known_limitations.md",
     ROOT / "docs" / "final" / "reproduction_commands.md",
@@ -32,6 +32,8 @@ MOJIBAKE_TOKENS = [
     "?" * 4,
     "\ufffd",
     "\u951f\u65a4\u62f7",
+    "\u951b",
+    "\u6b5a",
     "\u95bf",
     "\u95c1",
     "\u95c2",

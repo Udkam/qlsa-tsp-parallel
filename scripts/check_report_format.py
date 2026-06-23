@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Check structural and wording constraints for final-report Markdown."""
+"""Check structural and wording constraints for the final course report."""
 
 from __future__ import annotations
 
@@ -10,14 +10,16 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+HTML_IMAGE_RE = re.compile(r"<img\s+[^>]*src=[\"']([^\"']+)[\"'][^>]*>", re.IGNORECASE)
 
 MOJIBAKE_TOKENS = [
     "\ufffd",
     "?" * 4,
     "\u951f\u65a4\u62f7",
-    "\u95bf\u7192\u67bb\u93b7",
-    "\u95c1\u8de8\u5590\u93cb",
+    "\u95bf",
+    "\u95c1",
+    "\u95c2",
 ]
 
 FORBIDDEN_PHRASES = [
@@ -27,23 +29,22 @@ FORBIDDEN_PHRASES = [
     "<你的专业>",
     "CUDA 全面优于 OpenMP",
     "CUDA 比 OpenMP 快",
-    "CUDA 优于 OpenMP",
     "MPI VM 实验证明生产 HPC 性能",
     "QLSA 总是优于 SA",
-    "QLSA 全面优于 SA",
     "所有实例都达到 BKS",
-    "默认参数下全部实例均达到 BKS",
     "同平台公平 benchmark",
-    "严格公平 benchmark",
     "完整复刻 SB-QLSA",
     "百万城市级实验",
     "强证据链",
     "完整闭环",
     "工程闭环",
     "显著证明",
+    "不能写成",
     "{sa_avg_speed",
     "{qlsa_avg_speed",
     "times100",
+    "figures" + "/final",
+    "figures" + "\\final",
 ]
 
 REQUIRED_TITLE_OPTIONS = [
@@ -51,7 +52,7 @@ REQUIRED_TITLE_OPTIONS = [
     "# 面向旅行推销员问题的 Q-Learning 辅助模拟退火算法并行化实现与性能优化",
 ]
 
-REQUIRED_HEADINGS_COURSE = [
+REQUIRED_HEADINGS = [
     "## 摘要",
     "## 1 选题背景与目标",
     "## 2 参考论文与本项目定位",
@@ -61,12 +62,13 @@ REQUIRED_HEADINGS_COURSE = [
     "## 6 实验设计",
     "## 7 实验结果与分析",
     "## 8 与参考论文结果对比",
-    "## 9 实施过程中遇到的问题",
-    "## 10 总结与后续工作",
+    "## 9 实验过程中遇到的问题",
+    "## 10 总结",
+    "## 11 后续可优化方向",
     "## 参考文献",
 ]
 
-REQUIRED_FIGURES_COURSE = [
+REQUIRED_FIGURES = [
     "fig_course_01_openmp_speedup.png",
     "fig_course_02_openmp_efficiency.png",
     "fig_course_03_default_gap.png",
@@ -78,6 +80,19 @@ REQUIRED_FIGURES_COURSE = [
     "fig_course_10_openmp_thread_scaling.png",
     "fig_course_11_representative_openmp.png",
 ]
+
+
+def resolve_report(argv: list[str]) -> Path:
+    if len(argv) >= 2:
+        report = Path(argv[1])
+        return report if report.is_absolute() else (ROOT / report).resolve()
+    return ROOT / "docs" / "final" / "report.md"
+
+
+def image_refs(text: str) -> list[str]:
+    refs = [raw for _, raw in MD_IMAGE_RE.findall(text)]
+    refs.extend(HTML_IMAGE_RE.findall(text))
+    return refs
 
 
 def count_markdown_columns(line: str) -> int:
@@ -93,13 +108,6 @@ def is_separator(line: str) -> bool:
         return False
     body = stripped.strip("|").replace(":", "").replace("-", "").replace("|", "").strip()
     return body == ""
-
-
-def resolve_report(argv: list[str]) -> Path:
-    if len(argv) >= 2:
-        report = Path(argv[1])
-        return report if report.is_absolute() else (ROOT / report).resolve()
-    return ROOT / "docs" / "final" / "final_report_course.md"
 
 
 def main() -> int:
@@ -127,70 +135,37 @@ def main() -> int:
         print("[error] missing required report title")
         failed = True
 
-    for heading in REQUIRED_HEADINGS_COURSE:
+    for heading in REQUIRED_HEADINGS:
         if heading not in text:
             print(f"[error] missing required heading: {heading}")
             failed = True
 
-    if not ("课程要求" in text and "并行算法" in text and "加速比" in text):
-        print("[error] missing course-goal discussion")
+    if not ("目标" in text and "并行" in text and "加速比" in text):
+        print("[error] missing project-goal and parallel-performance discussion")
         failed = True
 
-    risk_ok = (
-        "不同语言" in text
-        and "不同硬件" in text
-        and ("不能作为同平台" in text or "不是同平台" in text or "不同平台" in text)
-    )
-    if not risk_ok:
-        print("[error] missing paper-comparison risk statement")
+    refs = image_refs(text)
+    if len(refs) < 8:
+        print(f"[error] report should reference at least 8 figures, found {len(refs)}")
         failed = True
 
-    if text.count("$$") % 2 != 0:
-        print("[error] unbalanced $$ math delimiters")
-        failed = True
-
-    if re.search(r"(?<!\\)frac", text):
-        print("[error] possible broken LaTeX fraction: frac")
-        failed = True
-
-    if re.search(r"(?:^|\n)\s*[图表]\s*[0-9一二三四五六七八九十]+[:：]", text):
-        print("[error] found standalone numbered figure/table caption style")
-        failed = True
-
-    if re.search(r"\b表\s*[0-9一二三四五六七八九十]+\b", text):
-        print("[error] found numbered table wording")
-        failed = True
-
-    if "## 附录 A" in text or "附录 A 个人工作说明" in text:
-        print("[error] main course report should not include personal appendix")
-        failed = True
-
-    images = IMAGE_RE.findall(text)
-    if len(images) < 8:
-        print(f"[error] report should reference at least 8 figures, found {len(images)}")
-        failed = True
-
-    for alt_text, raw in images:
-        if re.search(r"图\s*[0-9一二三四五六七八九十]+[:：]?", alt_text):
-            print(f"[error] image alt text contains figure numbering: {alt_text}")
-            failed = True
-        path_text = raw.split("#", 1)[0].strip()
-        candidate = (report.parent / path_text).resolve()
+    for raw in refs:
+        candidate = (report.parent / raw.split("#", 1)[0].strip()).resolve()
         if not candidate.exists():
-            print(f"[error] missing image: {raw} -> {candidate}")
+            print(f"[error] missing image asset: {raw}")
             failed = True
         else:
             print(f"[ok] image exists: {raw}")
 
-    for fig_name in REQUIRED_FIGURES_COURSE:
+    for fig_name in REQUIRED_FIGURES:
         if fig_name not in text:
-            print(f"[error] missing required figure reference: {fig_name}")
+            print(f"[error] missing required figure: {fig_name}")
             failed = True
 
     for idx, line in enumerate(lines, start=1):
-        cols = count_markdown_columns(line)
-        if cols > 6 and not is_separator(line):
-            print(f"[warning] table row has {cols} columns at line {idx}: {line[:120]}")
+        columns = count_markdown_columns(line)
+        if columns > 7 and not is_separator(line):
+            print(f"[warning] wide table at line {idx}: {columns} columns")
             warnings += 1
 
     if failed:

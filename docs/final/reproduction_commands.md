@@ -85,7 +85,7 @@ py scripts\analyze_large_mpi_vm.py --input results\raw\large_mpi_vm_formal_aggre
 ## 报告检查
 
 ```powershell
-py scripts\check_report_format.py docs\final\final_report_course.md
+py scripts\check_report_format.py docs\final\report.md
 py scripts\check_report_assets.py
 py scripts\check_privacy_and_encoding.py
 ```

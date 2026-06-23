@@ -4,7 +4,7 @@
 
 ## 最终提交入口
 
-- 课程项目报告：`docs/final/final_report_course.md`
+- 课程项目报告：`docs/final/report.md`
 - 个人报告：`docs/final/personal_report.md`
 - 复现实验命令：`docs/final/reproduction_commands.md`
 - 局限性说明：`docs/final/known_limitations.md`
@@ -99,8 +99,8 @@ QLSA + CUDA 候选批量评价：
 ## 提交前检查
 
 ```powershell
-py scripts\check_report_format.py docs\final\final_report_course.md
-py scripts\check_report_assets.py docs\final\final_report_course.md
+py scripts\check_report_format.py
+py scripts\check_report_assets.py
 py scripts\check_privacy_and_encoding.py
 py scripts\check_final_submission.py
 ctest --test-dir build-cuda-ninja --output-on-failure

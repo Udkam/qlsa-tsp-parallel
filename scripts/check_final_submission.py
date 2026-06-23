@@ -9,9 +9,10 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-COURSE_REPORT = ROOT / "docs" / "final" / "final_report_course.md"
+COURSE_REPORT = ROOT / "docs" / "final" / "report.md"
 PERSONAL_REPORT = ROOT / "docs" / "final" / "personal_report.md"
-IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+HTML_IMAGE_RE = re.compile(r"<img\s+[^>]*src=[\"']([^\"']+)[\"'][^>]*>", re.IGNORECASE)
 
 REQUIRED_RESULTS = [
     ROOT / "results" / "summary" / "step5_multi_cpu_summary.csv",
@@ -34,15 +35,21 @@ FORBIDDEN = [
     "figures" + "\\final",
     "\u951f\u65a4\u62f7",
     "\ufffd",
+    "\u951b",
+    "\u6b5a",
 ]
+
+
+def image_refs(text: str) -> list[str]:
+    refs = [raw for _, raw in MD_IMAGE_RE.findall(text)]
+    refs.extend(HTML_IMAGE_RE.findall(text))
+    return refs
 
 
 def check_images(report: Path) -> list[str]:
     errors: list[str] = []
     text = report.read_text(encoding="utf-8")
-    for alt, raw in IMAGE_RE.findall(text):
-        if re.search(r"图\s*[0-9一二三四五六七八九十]+\s*[:：]", alt):
-            errors.append(f"{report.relative_to(ROOT)}: numbered figure alt text: {alt}")
+    for raw in image_refs(text):
         candidate = (report.parent / raw.split("#", 1)[0].strip()).resolve()
         if not candidate.exists():
             errors.append(f"{report.relative_to(ROOT)}: missing image {raw}")

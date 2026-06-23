@@ -300,10 +300,10 @@ def openmp_thread_scaling() -> None:
     rows = read_csv("results/summary/openmp_scaling_final_summary.csv")
     threads = [1, 2, 4, 8, 12, 16]
     series = [
-        ("berlin52", "sa-omp", "berlin52 SA", COLORS["sa"], "o"),
-        ("berlin52", "qlsa-omp", "berlin52 QLSA", COLORS["qlsa"], "o"),
-        ("eil101", "sa-omp", "eil101 SA", "#6baed6", "s"),
-        ("eil101", "qlsa-omp", "eil101 QLSA", "#fd8d3c", "s"),
+        ("berlin52", "sa-omp", "berlin52 SA", "#1f77b4", "o"),
+        ("berlin52", "qlsa-omp", "berlin52 QLSA", "#ff7f0e", "o"),
+        ("eil101", "sa-omp", "eil101 SA", "#2ca02c", "s"),
+        ("eil101", "qlsa-omp", "eil101 QLSA", "#d62728", "s"),
     ]
     fig, ax = plt.subplots(figsize=(8.6, 4.8))
     for inst, alg, label, color, marker in series:
@@ -318,7 +318,7 @@ def openmp_thread_scaling() -> None:
             ]
             vals.append(val(hit[0], "speedup") if hit else math.nan)
         ax.plot(threads, vals, marker=marker, linewidth=1.8, color=color, label=label)
-    ax.plot(threads, threads, linestyle="--", linewidth=1.0, color=COLORS["reference"], label="理想线")
+    ax.plot(threads, threads, linestyle="--", linewidth=1.0, color="#9467bd", label="理想线")
     ax.set_title("OpenMP 线程扩展曲线")
     ax.set_xlabel("线程数")
     ax.set_ylabel("加速比")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Check Markdown report image references and unsafe wording."""
+"""Check final report image references and unsafe wording."""
 
 from __future__ import annotations
 
@@ -10,8 +10,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_REPORT = ROOT / "docs" / "final" / "final_report_course.md"
-IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+DEFAULT_REPORT = ROOT / "docs" / "final" / "report.md"
+MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+HTML_IMAGE_RE = re.compile(r"<img\s+[^>]*src=[\"']([^\"']+)[\"'][^>]*>", re.IGNORECASE)
 
 MOJIBAKE_TOKENS = [
     "\ufffd",
@@ -20,8 +21,6 @@ MOJIBAKE_TOKENS = [
     "\u95bf",
     "\u95c1",
     "\u95c2",
-    "å",
-    "ä",
 ]
 
 FORBIDDEN_PHRASES = [
@@ -38,6 +37,7 @@ FORBIDDEN_PHRASES = [
     "完整闭环",
     "工程闭环",
     "显著证明",
+    "不能写成",
     "<你的姓名>",
     "<你的学号>",
     "<你的专业>",
@@ -70,6 +70,12 @@ def choose_report() -> Path:
     return DEFAULT_REPORT
 
 
+def image_refs(text: str) -> list[tuple[str, str]]:
+    refs = [(alt, raw) for alt, raw in MD_IMAGE_RE.findall(text)]
+    refs.extend(("", raw) for raw in HTML_IMAGE_RE.findall(text))
+    return refs
+
+
 def main() -> int:
     report = choose_report()
     if not report.exists():
@@ -89,13 +95,13 @@ def main() -> int:
             print(f"[error] forbidden or placeholder phrase found: {phrase}")
             failed = True
 
-    image_refs = IMAGE_RE.findall(text)
-    if len(image_refs) < 8:
-        print(f"[error] expected at least 8 image references, found {len(image_refs)}")
+    refs = image_refs(text)
+    if len(refs) < 8:
+        print(f"[error] expected at least 8 image references, found {len(refs)}")
         failed = True
 
-    for alt_text, raw in image_refs:
-        if re.search(r"图\s*[0-9一二三四五六七八九十]+\s*[:：]", alt_text):
+    for alt_text, raw in refs:
+        if alt_text and re.search(r"图\s*[0-9一二三四五六七八九十]+\s*[:：]", alt_text):
             print(f"[error] image alt text should not contain numbered caption: {alt_text}")
             failed = True
 

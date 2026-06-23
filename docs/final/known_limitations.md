@@ -48,4 +48,4 @@ MPI island migration 没有作为已完成结果报告。原因是当前 SA/QLSA
 
 报告结论必须追溯到 `results/final/`、`results/summary/`、`results/reference/` 中的 CSV 或最终图表。`results/logs/`、构建目录、VM 私钥、VM hostfile 和浏览器/GPT 临时材料不应提交。
 
-最终课程提交文档只保留两份：`docs/final/final_report_course.md` 和 `docs/final/personal_report.md`。历史提交包副本已删除，避免多个报告版本并存。
+最终课程提交文档只保留两份：`docs/final/report.md` 和 `docs/final/personal_report.md`。历史提交包副本已删除，避免多个报告版本并存。

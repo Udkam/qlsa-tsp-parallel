@@ -2,17 +2,6 @@
 
 本仓库是并行算法课程大作业工程，主题为“面向旅行推销员问题的 Q-Learning 辅助模拟退火算法并行化实现与性能优化”。项目以 TSP 为应用背景，实现了 SA、QLSA、OpenMP 多搜索链并行、CUDA 后端和 MPI + OpenMP 双虚拟机分布式实验。
 
-## 最终提交入口
-
-- 课程项目报告：`docs/final/report.md`
-- 个人报告：`docs/final/personal_report.md`
-- 复现实验命令：`docs/final/reproduction_commands.md`
-- 局限性说明：`docs/final/known_limitations.md`
-- 关键结果索引：`results/final/RESULTS_INDEX.md`
-- 报告图片：`figures/`
-
-历史报告、过程文档、旧图和临时提交包已清理。当前报告图片统一放在 `figures/` 根目录。
-
 ## 工程内容
 
 - C++20 TSPLIB95 数据解析；

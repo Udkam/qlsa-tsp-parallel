@@ -30,7 +30,9 @@ MPI + OpenMP hybrid 后端已在两台 Ubuntu VM 上通过真实 `mpirun` 完成
 
 该实验环境是 VMware NAT 双 VM，不是生产 HPC 集群。报告可以写“真实双 VM MPI 运行证据”和“分布式内存扩展路径可行”，不能写成生产级 HPC benchmark。
 
-MPI island migration 没有作为已完成结果报告。原因是当前 SA/QLSA runner 以整条 chain 为执行单位，不暴露可安全暂停/恢复的 mid-run state；在没有 chunked search API 的情况下强行实现会造成伪同步或伪迁移。
+SA/QLSA 已提供可暂停并继续的 chunked search state，单机 OpenMP 已实现 `independent`、`ring`、`global` 三种 island 拓扑，并在同步 chunk 边界完成迁移。当前正式消融只覆盖 eil76，且 SA 在 10k 周期下的改善趋势经过 Holm 校正后未达到 0.05，因此不能写成普遍显著优势。
+
+MPI 跨节点 island migration 仍未完成。当前迁移协调器依赖单进程共享内存和 OpenMP 同步边界，不能把单机结果写成分布式迁移证据。
 
 ## 5. 大实例实验的边界
 
@@ -46,6 +48,6 @@ MPI island migration 没有作为已完成结果报告。原因是当前 SA/QLSA
 
 ## 7. 数据与提交边界
 
-报告结论必须追溯到 `results/final/`、`results/summary/`、`results/reference/` 中的 CSV 或最终图表。`results/logs/`、构建目录、VM 私钥、VM hostfile 和浏览器/GPT 临时材料不应提交。
+报告结论必须追溯到 `results/final/`、`results/summary/`、`results/reference/` 中的 CSV 或最终图表。公平配对与 island 结果分别由 `fair_paired_eil76_*.csv` 和 `island_eil76_*.csv` 提供正式摘要。`results/logs/`、构建目录、VM 私钥、VM hostfile 和浏览器/GPT 临时材料不应提交。
 
 最终课程提交文档只保留两份：`docs/final/report.md` 和 `docs/final/personal_report.md`。历史提交包副本已删除，避免多个报告版本并存。

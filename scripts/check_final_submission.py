@@ -19,6 +19,12 @@ REQUIRED_RESULTS = [
     ROOT / "results" / "summary" / "targeted_quality_summary.csv",
     ROOT / "results" / "summary" / "cuda_qlsa_candidate_summary.csv",
     ROOT / "results" / "summary" / "mpi_vm_scaling_formal_summary.csv",
+    ROOT / "results" / "summary" / "fair_paired_eil76_summary.csv",
+    ROOT / "results" / "summary" / "fair_paired_eil76_pairwise.csv",
+    ROOT / "results" / "summary" / "fair_paired_eil76_friedman.csv",
+    ROOT / "results" / "summary" / "island_eil76_summary.csv",
+    ROOT / "results" / "summary" / "island_eil76_paired_comparisons.csv",
+    ROOT / "results" / "final" / "fair_island_clean_run_provenance.csv",
     ROOT / "results" / "reference" / "paper_hard_instance_quality.csv",
     ROOT / "results" / "final" / "RESULTS_INDEX.md",
 ]

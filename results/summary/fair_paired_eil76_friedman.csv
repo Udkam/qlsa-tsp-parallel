@@ -1,0 +1,2 @@
+condition_id,budget_scheme,instance,requested_backend,actual_backend,algorithms_json,union_seed_count,complete_seed_blocks,complete_seed_values_json,statistic,degrees_of_freedom,p_value,tie_correction,mean_ranks_json,status
+da6e2b98e8cbe0b28478,equal-iterations,eil76,omp,omp,"[""sa"",""current"",""paper"",""paper-sb""]",20,20,"[2601,2602,2603,2604,2605,2606,2607,2608,2609,2610,2611,2612,2613,2614,2615,2616,2617,2618,2619,2620]",6.04945054945,3,0.109228978205,0.91,"{""current"":2.85,""paper"":2.825,""paper-sb"":2.2,""sa"":2.125}",ok

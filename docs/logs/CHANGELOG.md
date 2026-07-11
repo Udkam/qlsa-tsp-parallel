@@ -834,6 +834,60 @@ py -m py_compile scripts\check_report_assets.py scripts\check_report_format.py s
 
 结果均通过。
 
+## 2026-07-11 Island 与公平实验报告整合
+
+在三方只读审计确认本轮实现能够明显增强课程报告的算法设计深度、实验公平性和证据可信度后，将 `codex/fair-experiments-island-migration` 快进合并到本地 `main`，并在干净的 `main@5ccaf3c` 上重新执行正式实验。
+
+### 干净版本重跑
+
+- 公平配对实验：eil76、4 种算法、20 个共同种子，**80/80 jobs**；
+  - manifest 记录 `git_commit=5ccaf3c`、`git_dirty=false`；
+  - SA 与 paper-sb 平均最优长度均为 `540.6`，BKS 命中率为 `10%/25%`；
+  - Friedman `p=0.1092`，Holm 校正后无两两比较达到 0.05。
+- OpenMP island 消融：eil76、2 种算法、10 个共同种子、3 种拓扑、2 个迁移周期，**120/120 jobs**；
+  - manifest 记录 `git_commit=5ccaf3c`、`git_dirty=false`；
+  - SA 在 10k 周期下 ring/global 相对匹配 independent 的平均差为 `-3.5/-4.0`；
+  - 原始 sign-test `p=0.0215`，Holm 后 `p=0.0859`，报告按改善趋势表述；
+  - paper-sb 未观察到稳定迁移收益。
+- 第一份公平重跑在 70/80 时遇到 Windows 对 `manifest.json.tmp` 的短暂文件占用，目录已重命名为带 `incomplete_winerror5` 后缀并保留在 `tmp/`；正式数据只采用完整 v2 目录。
+
+### 正式摘要归档
+
+新增以下可公开、无本机绝对路径的汇总文件：
+
+- `results/summary/fair_paired_eil76_summary.csv`
+- `results/summary/fair_paired_eil76_pairwise.csv`
+- `results/summary/fair_paired_eil76_friedman.csv`
+- `results/summary/island_eil76_summary.csv`
+- `results/summary/island_eil76_paired_comparisons.csv`
+- `results/final/fair_island_clean_run_provenance.csv`
+
+同步更新 `results/final/RESULTS_INDEX.md` 与 `docs/final/known_limitations.md`，明确单机 OpenMP island、单实例覆盖和多重校正边界。
+
+### 本地课程报告
+
+`docs/final/report.md` 与根目录 `小组及个人报告.pdf` 属于 `.gitignore` 排除的本地课程交付物，未发布到远端。正文按原有“结论—数据—原因—边界”格式加入：
+
+- OpenMP island 的可续跑状态、同步边界与三种拓扑；
+- requested/actual backend、实际线程/迭代、deadline 和 total/kernel 分层计时；
+- 20 个共同种子的四算法公平复核；
+- 120-job island 迁移消融；
+- 统计与结论边界、实施问题、总结、后续方向和个人附录同步更新。
+
+PDF 采用 A4、中文无衬线字体、现有标题层级和灰色表格样式重新生成，共 30 页；已检查全部页面缩略图及新增内容页，未发现文字裁切、表格越界、图片缺失或乱码。
+
+主要验证命令：
+
+```powershell
+python scripts\check_report_format.py docs\final\report.md
+python scripts\check_report_assets.py docs\final\report.md
+python scripts\check_final_submission.py
+python scripts\check_privacy_and_encoding.py
+ctest --test-dir tmp\build-measurement-release --output-on-failure
+ctest --test-dir tmp\build-measurement-cpu-release --output-on-failure
+python -S -m unittest tests.test_fair_experiment_pipeline tests.test_fair_runner_validation tests.test_fair_analyzer_integrity tests.test_island_ablation_pipeline tests.test_island_runner_hardening tests.test_island_analyzer_hardening
+```
+
 ## 2026-07-11 公平实验、限时搜索与 OpenMP island migration
 
 本轮工作在独立分支 `codex/fair-experiments-island-migration` 上完成，目标是补齐课程项目在“实验公平性、后端真实性、统计可信度和可协作多链搜索”上的工程缺口；未修改最终报告正文。

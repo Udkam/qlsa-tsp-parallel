@@ -26,7 +26,18 @@
 | `figures/fig_course_05_policy_comparison.png` | QLSA 策略对比图。 |
 | `figures/fig_qlsa_variant_alignment.png` | QLSA 机制对齐变体最小偏差图。 |
 
-## 3. CUDA chain / candidate
+## 3. 公平配对与 OpenMP Island
+
+| 文件 | 用途 |
+|---|---|
+| `results/summary/fair_paired_eil76_summary.csv` | eil76 四算法、20 个共同种子的等迭代质量与时间汇总。 |
+| `results/summary/fair_paired_eil76_pairwise.csv` | 配对 Wilcoxon、精确 sign test 与 Holm 校正结果。 |
+| `results/summary/fair_paired_eil76_friedman.csv` | 四算法完整区组 Friedman 检验与平均秩。 |
+| `results/summary/island_eil76_summary.csv` | eil76 independent/ring/global 在匹配迁移周期下的质量、时间与迁移采纳统计。 |
+| `results/summary/island_eil76_paired_comparisons.csv` | 迁移拓扑相对匹配 independent 基线的配对差值、sign test 与 Holm 校正。 |
+| `results/final/fair_island_clean_run_provenance.csv` | 干净 main 提交、job 数与 config/executable/runner/input/environment SHA-256。 |
+
+## 4. CUDA chain / candidate
 
 | 文件 | 用途 |
 |---|---|
@@ -38,7 +49,7 @@
 | `figures/fig_course_06_cuda_boundary.png` | CUDA 多链模式与候选批量评价对比图。 |
 | `figures/fig_cuda_candidate_policy_formal.png` | CUDA SA 候选策略运行时间对比图。 |
 
-## 4. MPI + OpenMP
+## 5. MPI + OpenMP
 
 | 文件 | 用途 |
 |---|---|
@@ -47,7 +58,7 @@
 | `results/summary/large_mpi_vm_formal_aggressive_summary.csv` | ch130/a280 大实例双 VM formal subset。 |
 | `figures/fig_course_07_mpi_scaling.png` | 双虚拟机 MPI + OpenMP 扩展性图。 |
 
-## 5. 大实例压力测试
+## 6. 大实例压力测试
 
 | 文件 | 用途 |
 |---|---|
@@ -58,7 +69,7 @@
 | `results/summary/large_openmp_l3_quick_summary.csv` | L3 quick OpenMP 结果。 |
 | `figures/fig_course_11_representative_openmp.png` | 代表实例 OpenMP 压力测试图。 |
 
-## 6. 论文与 Python 参考
+## 7. 论文与 Python 参考
 
 | 文件 | 用途 |
 |---|---|
@@ -68,10 +79,11 @@
 | `results/summary/python_reference_summary.csv` | Python faithful baseline 与 C++ 对照。 |
 | `figures/fig_course_09_paper_quality.png` | 论文 hard-instance quality 对比图。 |
 
-## 7. 结论边界
+## 8. 结论边界
 
 - OpenMP multi-chain 是当前主要性能结论。
 - CUDA candidate-level evaluation 是显式启用的 batch proposal 变体，不替代默认 `cuda_mode=chain`。
 - MPI 结果来自真实双 VM `mpirun`，但环境是 VMware NAT，不等同生产 HPC benchmark。
 - QLSA 只在部分实例/预算下优于 SA，不能写成总是优于 SA。
 - C++ 主线没有声称完整复刻论文 SB-QLSA。
+- 公平配对与 island 正式结果目前只覆盖 eil76；SA 迁移趋势在 Holm 校正后未达到 0.05，不能推广为普遍显著优势。

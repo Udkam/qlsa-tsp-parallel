@@ -2,6 +2,8 @@
 
 #include <iostream>
 
+#include "tsp/timer.hpp"
+
 namespace tsp {
 
 #ifdef TSP_HAS_CUDA
@@ -18,21 +20,39 @@ bool cuda_available() noexcept {
 }
 
 ParallelResult run_cuda_chains(const DistanceMatrix& dm, const ParallelParams& params) {
+    Timer total_timer;
 #ifdef TSP_HAS_CUDA
     if (!cuda_available_impl()) {
         std::cerr << "Warning: CUDA is not available at runtime; falling back to serial multi-chain execution.\n";
         ParallelParams fallback = params;
         fallback.cuda_enabled = false;
         fallback.threads = 1;
-        return run_parallel_chains(dm, fallback);
+        ParallelResult result = run_parallel_chains(dm, fallback);
+        result.requested_backend = ParallelBackend::Cuda;
+        result.backend_fallback = true;
+        result.backend_fallback_reason =
+            "CUDA was requested but no CUDA device is available at runtime";
+        result.total_elapsed_ms = total_timer.elapsed_ms();
+        result.elapsed_ms = result.total_elapsed_ms;
+        return result;
     }
-    return run_cuda_chains_impl(dm, params);
+    ParallelResult result = run_cuda_chains_impl(dm, params);
+    result.total_elapsed_ms = total_timer.elapsed_ms();
+    result.elapsed_ms = result.total_elapsed_ms;
+    return result;
 #else
     std::cerr << "Warning: CUDA was not enabled at build time; falling back to serial multi-chain execution.\n";
     ParallelParams fallback = params;
     fallback.cuda_enabled = false;
     fallback.threads = 1;
-    return run_parallel_chains(dm, fallback);
+    ParallelResult result = run_parallel_chains(dm, fallback);
+    result.requested_backend = ParallelBackend::Cuda;
+    result.backend_fallback = true;
+    result.backend_fallback_reason =
+        "CUDA was requested but is not enabled in this build";
+    result.total_elapsed_ms = total_timer.elapsed_ms();
+    result.elapsed_ms = result.total_elapsed_ms;
+    return result;
 #endif
 }
 

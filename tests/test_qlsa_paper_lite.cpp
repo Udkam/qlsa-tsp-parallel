@@ -3,6 +3,9 @@
 // candidate-leader / diversity-state variant; see
 // docs/dev/paper_lite_qlsa_design.md.
 
+#ifdef NDEBUG
+#error "Tests require assertions; NDEBUG must not be defined"
+#endif
 #include <cassert>
 #include <filesystem>
 #include <iostream>

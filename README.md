@@ -16,8 +16,10 @@
 - OpenMP 多搜索链并行；
 - CUDA 多链模式、候选批量评价、候选策略和并行路径反转；
 - QLSA 机制对齐变体：`current`、`paper`、`paper-sb`；
+- SA/QLSA 可暂停、分块续跑和共享 wall-clock deadline；
+- OpenMP island 模型：`independent`、`ring`、`global` 三种拓扑；
 - MPI + OpenMP 分布式多链搜索；
-- 自动实验、CSV 汇总、图表生成和报告检查脚本。
+- 严格后端/线程核验、paired-seed 公平实验、统计分析和报告检查脚本。
 
 ## 构建与测试
 
@@ -69,6 +71,39 @@ QLSA + CUDA 候选批量评价：
 .\build-cuda-ninja\tsp_sa.exe --qlsa --input data\a280.tsp --parallel cuda --cuda_mode candidate --cuda_candidates_per_iter 128 --cuda_block_size 128 --cuda_reversal_mode parallel --chains 64 --iterations 500000 --seed 1 --init nn --alpha 0.1 --gamma 0.9 --epsilon 0.1 --policy epsilon-greedy
 ```
 
+共享 30 秒 solver 预算（所有链使用同一个绝对 deadline）：
+
+```powershell
+.\build-cuda-ninja\tsp_sa.exe --input data\eil101.tsp --parallel omp --chains 8 --threads 8 --iterations 1000000000 --time-limit-ms 30000 --migration-interval 10000 --seed 1 --csv-only
+```
+
+OpenMP island migration：
+
+```powershell
+.\build-cuda-ninja\tsp_sa.exe --qlsa --qlsa_variant paper-sb --input data\eil101.tsp --parallel omp --chains 8 --threads 8 --iterations 1000000 --migration-topology ring --migration-interval 10000 --seed 1 --csv-only
+```
+
+CSV 保留原有 14 列前缀，并追加 total/kernel 计时、requested/actual backend、fallback 原因、实际迭代数、deadline、迁移统计和 `actual_threads`。CUDA 的 `total_elapsed_ms` 覆盖首次设备探测、分配、传输、kernel、回传、释放与结果校验；`cuda_kernel_elapsed_ms` 只表示 kernel event 时间。
+
+## 公平实验与岛模型消融
+
+正式 runner 要求显式指定刚构建的可执行文件，避免误用旧构建。默认公平矩阵使用 20 个 paired seeds，比较等搜索迭代与固定 solver wall time 两种互补预算；算法在每个 seed 内按可复现循环顺序执行。
+
+```powershell
+python scripts\run_fair_experiments.py --executable build-cuda-ninja\tsp_sa.exe --budget equal-iterations --instances eil76 rat99 eil101 --run-id fair_equal_iterations
+python scripts\run_fair_experiments.py --executable build-cuda-ninja\tsp_sa.exe --budget fixed-time --instances eil76 rat99 eil101 --run-id fair_fixed_time
+python scripts\analyze_paired_experiments.py --input results\fair_experiments\fair_equal_iterations --output-dir results\fair_experiments\fair_equal_iterations_analysis
+```
+
+分析器默认只接受四算法完整的共同 seed block，并输出 bootstrap CI、配对 Wilcoxon、精确 sign test、Friedman 与 Holm 校正；只有探索性分析才使用 `--allow-incomplete-pairs`。
+
+岛模型消融默认比较 SA 与 `paper-sb` 在 `independent`、`ring`、`global` 下的结果，并统计迁移尝试、采纳率、质量差与运行时：
+
+```powershell
+python scripts\run_island_ablation.py --executable build-cuda-ninja\tsp_sa.exe --run-id island_ablation
+python scripts\analyze_island_ablation.py results\island_ablation\island_ablation --output-dir results\island_ablation\island_ablation_analysis
+```
+
 ## 关键结果位置
 
 - 默认参数 OpenMP 多实例实验：`results/summary/step5_multi_cpu_summary.csv`
@@ -98,4 +133,5 @@ py scripts\check_report_assets.py
 py scripts\check_privacy_and_encoding.py
 py scripts\check_final_submission.py
 ctest --test-dir build-cuda-ninja --output-on-failure
+python -S -m unittest -v tests.test_fair_experiment_pipeline tests.test_fair_runner_validation tests.test_fair_analyzer_integrity tests.test_island_ablation_pipeline tests.test_island_runner_hardening tests.test_island_analyzer_hardening
 ```

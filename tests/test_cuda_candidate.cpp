@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#error "Tests require assertions; NDEBUG must not be defined"
+#endif
 #include <cassert>
 #include <cstdint>
 #include <iostream>
@@ -46,6 +49,14 @@ void assert_candidate_result(const tsp::DistanceMatrix& dm, const tsp::ParallelR
     assert(tsp::is_valid_tour(result.best_tour, dm.size()));
     assert(result.best_length == tsp::tour_length(result.best_tour, dm));
     assert(result.best_length == 40);
+    assert(result.elapsed_ms == result.total_elapsed_ms);
+    assert(result.total_elapsed_ms > 0.0);
+    assert(result.cuda_kernel_elapsed_ms > 0.0);
+    assert(result.total_elapsed_ms >= result.cuda_kernel_elapsed_ms);
+    assert(result.requested_backend == tsp::ParallelBackend::Cuda);
+    assert(result.actual_backend == tsp::ParallelBackend::Cuda);
+    assert(!result.backend_fallback);
+    assert(result.backend_fallback_reason.empty());
     for (const tsp::ChainResult& chain : result.chain_results) {
         assert(tsp::is_valid_tour(chain.best_tour, dm.size()));
         assert(chain.best_length == tsp::tour_length(chain.best_tour, dm));

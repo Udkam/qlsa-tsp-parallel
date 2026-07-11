@@ -26,6 +26,8 @@ tmp/
 results/logs/
 results/archive/
 results/traces/
+results/fair_experiments/
+results/island_ablation/
 .mpi_sync_stage/
 mpi_project_sync.tar.gz
 archive/local_cleanup/

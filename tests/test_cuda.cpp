@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#error "Tests require assertions; NDEBUG must not be defined"
+#endif
 #include <cassert>
 #include <cstdint>
 #include <iostream>
@@ -41,11 +44,17 @@ void assert_valid(const tsp::DistanceMatrix& dm, const tsp::ParallelResult& resu
     assert(tsp::is_valid_tour(result.best_tour, dm.size()));
     assert(result.best_length == tsp::tour_length(result.best_tour, dm));
     assert(result.best_length == 40);
+    assert(result.elapsed_ms == result.total_elapsed_ms);
+    assert(result.total_elapsed_ms > 0.0);
+    assert(result.requested_backend == tsp::ParallelBackend::Cuda);
+    assert(result.total_iterations_completed == 4000);
+    assert(!result.deadline_reached);
     for (int i = 0; i < result.chains; ++i) {
         const tsp::ChainResult& chain = result.chain_results[static_cast<size_t>(i)];
         assert(chain.chain_id == i);
         assert(tsp::is_valid_tour(chain.best_tour, dm.size()));
         assert(chain.best_length == tsp::tour_length(chain.best_tour, dm));
+        assert(chain.iterations_completed == 1000);
     }
 }
 
@@ -53,10 +62,25 @@ void assert_valid(const tsp::DistanceMatrix& dm, const tsp::ParallelResult& resu
 
 int main() {
     const tsp::DistanceMatrix dm = load_fixture_dm();
+    const bool cuda_is_available = tsp::cuda_available();
 
     const tsp::ParallelParams sa_params = make_cuda_params(tsp::AlgorithmKind::SA, 7);
     const tsp::ParallelResult sa_result = tsp::run_parallel_chains(dm, sa_params);
     assert_valid(dm, sa_result);
+    if (cuda_is_available) {
+        assert(sa_result.actual_backend == tsp::ParallelBackend::Cuda);
+        assert(!sa_result.backend_fallback);
+        assert(sa_result.backend_fallback_reason.empty());
+        assert(sa_result.cuda_kernel_elapsed_ms > 0.0);
+        assert(sa_result.total_elapsed_ms >= sa_result.cuda_kernel_elapsed_ms);
+        assert(sa_result.actual_threads == sa_params.cuda_block_size);
+    } else {
+        assert(sa_result.actual_backend == tsp::ParallelBackend::CpuSerial);
+        assert(sa_result.backend_fallback);
+        assert(!sa_result.backend_fallback_reason.empty());
+        assert(sa_result.cuda_kernel_elapsed_ms == 0.0);
+        assert(sa_result.actual_threads == 1);
+    }
 
     const tsp::ParallelParams qlsa_params = make_cuda_params(tsp::AlgorithmKind::QLSA, 7);
     const tsp::ParallelResult qlsa_result = tsp::run_parallel_chains(dm, qlsa_params);
@@ -71,6 +95,6 @@ int main() {
                sa_result.chain_results[static_cast<size_t>(i)].best_length);
     }
 
-    std::cout << "test_cuda passed; cuda_available=" << (tsp::cuda_available() ? "true" : "false") << '\n';
+    std::cout << "test_cuda passed; cuda_available=" << (cuda_is_available ? "true" : "false") << '\n';
     return 0;
 }

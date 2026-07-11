@@ -38,6 +38,9 @@ void validate_parallel_params(const ParallelParams& params) {
     if (iterations < 1) {
         throw std::invalid_argument("iterations must be >= 1");
     }
+    if (iterations > std::numeric_limits<int64_t>::max() / params.chains) {
+        throw std::overflow_error("iterations * chains overflows int64_t");
+    }
 }
 
 ChainResult run_one_chain(const DistanceMatrix& dm, const ParallelParams& params, int chain_id_value) {
@@ -55,6 +58,8 @@ ChainResult run_one_chain(const DistanceMatrix& dm, const ParallelParams& params
         chain.elapsed_ms = result.elapsed_ms;
         chain.accepted_moves = result.accepted_moves;
         chain.improved_moves = result.improved_moves;
+        chain.iterations_completed = result.iterations_completed;
+        chain.deadline_reached = result.deadline_reached;
         return chain;
     }
 
@@ -67,6 +72,8 @@ ChainResult run_one_chain(const DistanceMatrix& dm, const ParallelParams& params
     chain.elapsed_ms = result.elapsed_ms;
     chain.accepted_moves = result.accepted_moves;
     chain.improved_moves = result.improved_moves;
+    chain.iterations_completed = result.iterations_completed;
+    chain.deadline_reached = result.deadline_reached;
     return chain;
 }
 
@@ -78,6 +85,18 @@ bool openmp_available() noexcept {
 #else
     return false;
 #endif
+}
+
+const char* parallel_backend_name(ParallelBackend backend) noexcept {
+    switch (backend) {
+        case ParallelBackend::CpuSerial:
+            return "cpu_serial";
+        case ParallelBackend::OpenMP:
+            return "openmp";
+        case ParallelBackend::Cuda:
+            return "cuda";
+    }
+    return "unknown";
 }
 
 uint64_t splitmix64(uint64_t x) noexcept {
@@ -102,6 +121,17 @@ ParallelResult run_parallel_chains(const DistanceMatrix& dm, const ParallelParam
 
     Timer timer;
     ParallelResult result;
+    result.requested_backend = params.threads > 1
+                                   ? ParallelBackend::OpenMP
+                                   : ParallelBackend::CpuSerial;
+#ifndef TSP_HAS_OPENMP
+    result.actual_backend = ParallelBackend::CpuSerial;
+    if (params.threads > 1) {
+        result.backend_fallback = true;
+        result.backend_fallback_reason =
+            "OpenMP was requested but is not available in this build";
+    }
+#endif
     result.chains = params.chains;
     result.threads = params.threads;
     result.base_seed = params.base_seed;
@@ -109,14 +139,29 @@ ParallelResult run_parallel_chains(const DistanceMatrix& dm, const ParallelParam
 
 #ifdef TSP_HAS_OPENMP
     if (params.threads > 1) {
-#pragma omp parallel for schedule(static) num_threads(params.threads)
-        for (int chain_id_value = 0; chain_id_value < params.chains; ++chain_id_value) {
-            result.chain_results[static_cast<size_t>(chain_id_value)] =
-                run_one_chain(dm, params, chain_id_value);
+#pragma omp parallel num_threads(params.threads)
+        {
+#pragma omp single
+            result.actual_threads = omp_get_num_threads();
+#pragma omp for schedule(static)
+            for (int chain_id_value = 0; chain_id_value < params.chains; ++chain_id_value) {
+                result.chain_results[static_cast<size_t>(chain_id_value)] =
+                    run_one_chain(dm, params, chain_id_value);
+            }
+        }
+        result.actual_backend = result.actual_threads > 1
+                                    ? ParallelBackend::OpenMP
+                                    : ParallelBackend::CpuSerial;
+        if (result.actual_threads <= 1) {
+            result.backend_fallback = true;
+            result.backend_fallback_reason =
+                "OpenMP was requested but the runtime created a single-thread team";
         }
     } else
 #endif
     {
+        result.actual_threads = 1;
+        result.actual_backend = ParallelBackend::CpuSerial;
         for (int chain_id_value = 0; chain_id_value < params.chains; ++chain_id_value) {
             result.chain_results[static_cast<size_t>(chain_id_value)] =
                 run_one_chain(dm, params, chain_id_value);
@@ -129,6 +174,8 @@ ParallelResult run_parallel_chains(const DistanceMatrix& dm, const ParallelParam
         const ChainResult& chain = result.chain_results[static_cast<size_t>(i)];
         result.total_accepted_moves += chain.accepted_moves;
         result.total_improved_moves += chain.improved_moves;
+        result.total_iterations_completed += chain.iterations_completed;
+        result.deadline_reached = result.deadline_reached || chain.deadline_reached;
         if (chain.best_length < best_length) {
             best_length = chain.best_length;
             best_index = i;
@@ -143,12 +190,13 @@ ParallelResult run_parallel_chains(const DistanceMatrix& dm, const ParallelParam
     result.best_tour = best_chain.best_tour;
     result.best_length = best_chain.best_length;
     result.final_length_of_best_chain = best_chain.final_length;
-    result.elapsed_ms = timer.elapsed_ms();
-
     const int checked_best_length = tour_length(result.best_tour, dm);
     if (checked_best_length != result.best_length) {
         throw std::runtime_error("parallel best_length verification failed");
     }
+
+    result.total_elapsed_ms = timer.elapsed_ms();
+    result.elapsed_ms = result.total_elapsed_ms;
 
     return result;
 }

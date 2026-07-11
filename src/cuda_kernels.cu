@@ -42,6 +42,72 @@ void check_cuda(cudaError_t status, const char* what) {
     }
 }
 
+template <typename T>
+class DeviceBuffer {
+public:
+    DeviceBuffer() = default;
+    DeviceBuffer(const DeviceBuffer&) = delete;
+    DeviceBuffer& operator=(const DeviceBuffer&) = delete;
+
+    ~DeviceBuffer() {
+        if (ptr_ != nullptr) {
+            (void)cudaFree(ptr_);
+        }
+    }
+
+    void allocate(size_t count, const char* what) {
+        check_cuda(cudaMalloc(reinterpret_cast<void**>(&ptr_), count * sizeof(T)), what);
+    }
+
+    [[nodiscard]] T* get() const noexcept {
+        return ptr_;
+    }
+
+    void release(const char* what) {
+        if (ptr_ == nullptr) {
+            return;
+        }
+        T* const ptr = ptr_;
+        ptr_ = nullptr;
+        check_cuda(cudaFree(ptr), what);
+    }
+
+private:
+    T* ptr_ = nullptr;
+};
+
+class CudaEvent {
+public:
+    explicit CudaEvent(const char* what) {
+        check_cuda(cudaEventCreate(&event_), what);
+    }
+
+    CudaEvent(const CudaEvent&) = delete;
+    CudaEvent& operator=(const CudaEvent&) = delete;
+
+    ~CudaEvent() {
+        if (event_ != nullptr) {
+            (void)cudaEventDestroy(event_);
+        }
+    }
+
+    [[nodiscard]] cudaEvent_t get() const noexcept {
+        return event_;
+    }
+
+    void release(const char* what) {
+        if (event_ == nullptr) {
+            return;
+        }
+        const cudaEvent_t event = event_;
+        event_ = nullptr;
+        check_cuda(cudaEventDestroy(event), what);
+    }
+
+private:
+    cudaEvent_t event_ = nullptr;
+};
+
 __host__ __device__ uint64_t splitmix64_device(uint64_t x) {
     x += 0x9E3779B97F4A7C15ULL;
     x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
@@ -939,23 +1005,28 @@ void validate_cuda_params(const DistanceMatrix& dm, const ParallelParams& params
     if (iterations < 1) {
         throw std::invalid_argument("iterations must be >= 1");
     }
+    if (iterations > std::numeric_limits<int64_t>::max() / params.chains) {
+        throw std::overflow_error("iterations * chains overflows int64_t");
+    }
 }
 
 ParallelResult build_parallel_result(const DistanceMatrix& dm,
                                      const ParallelParams& params,
                                      const std::vector<int>& best_tours,
-                                     const std::vector<DeviceChainSummary>& summaries,
-                                     double elapsed_ms) {
+                                     const std::vector<DeviceChainSummary>& summaries) {
     ParallelResult result;
     result.chains = params.chains;
     result.threads = params.cuda_block_size;
+    result.actual_threads = params.cuda_block_size;
     result.base_seed = params.base_seed;
-    result.elapsed_ms = elapsed_ms;
     result.chain_results.resize(static_cast<size_t>(params.chains));
 
     int best_index = -1;
     int best_length = std::numeric_limits<int>::max();
     const int n = dm.size();
+    const int64_t iteration_budget = params.algorithm == AlgorithmKind::SA
+                                         ? params.sa_params.iterations
+                                         : params.qlsa_params.sa.iterations;
     for (int chain_id = 0; chain_id < params.chains; ++chain_id) {
         ChainResult& chain = result.chain_results[static_cast<size_t>(chain_id)];
         chain.chain_id = chain_id;
@@ -967,9 +1038,11 @@ ParallelResult build_parallel_result(const DistanceMatrix& dm,
         chain.elapsed_ms = 0.0;
         chain.accepted_moves = summaries[static_cast<size_t>(chain_id)].accepted_moves;
         chain.improved_moves = summaries[static_cast<size_t>(chain_id)].improved_moves;
+        chain.iterations_completed = n >= 3 ? iteration_budget : 0;
 
         result.total_accepted_moves += chain.accepted_moves;
         result.total_improved_moves += chain.improved_moves;
+        result.total_iterations_completed += chain.iterations_completed;
         if (!is_valid_tour(chain.best_tour, n)) {
             throw std::runtime_error("CUDA chain returned an invalid best tour");
         }
@@ -1007,6 +1080,7 @@ bool cuda_available_impl() noexcept {
 
 ParallelResult run_cuda_chains_impl(const DistanceMatrix& dm, const ParallelParams& params) {
     validate_cuda_params(dm, params);
+    Timer total_timer;
     int device_count = 0;
     check_cuda(cudaGetDeviceCount(&device_count), "cudaGetDeviceCount");
     if (device_count <= 0) {
@@ -1032,7 +1106,7 @@ ParallelResult run_cuda_chains_impl(const DistanceMatrix& dm, const ParallelPara
                "cudaDeviceGetAttribute(cudaDevAttrMaxSharedMemoryPerBlock)");
 
     std::vector<DeviceAction> host_actions;
-    DeviceAction* device_actions = nullptr;
+    DeviceBuffer<DeviceAction> device_actions;
     int action_count = 0;
     size_t shared_bytes = static_cast<size_t>(3 * n) * sizeof(int);
     if (params.algorithm == AlgorithmKind::QLSA) {
@@ -1040,37 +1114,37 @@ ParallelResult run_cuda_chains_impl(const DistanceMatrix& dm, const ParallelPara
         action_count = static_cast<int>(host_actions.size());
         shared_bytes += static_cast<size_t>(alignof(double)) +
                         static_cast<size_t>(kStateCount * action_count) * sizeof(double);
-        check_cuda(cudaMalloc(&device_actions, host_actions.size() * sizeof(DeviceAction)),
-                   "cudaMalloc(actions)");
-        check_cuda(cudaMemcpy(device_actions, host_actions.data(),
-                              host_actions.size() * sizeof(DeviceAction),
-                              cudaMemcpyHostToDevice),
-                   "cudaMemcpy(actions)");
     }
     if (params.cuda_mode == CudaMode::Candidate) {
         shared_bytes += static_cast<size_t>(3 * params.cuda_block_size) * sizeof(int);
     }
     if (shared_bytes > static_cast<size_t>(max_shared)) {
-        if (device_actions != nullptr) {
-            cudaFree(device_actions);
-        }
         throw std::runtime_error("CUDA shared memory requirement exceeds device limit");
     }
 
-    int* device_dm = nullptr;
-    int* device_best_tours = nullptr;
-    DeviceChainSummary* device_summaries = nullptr;
+    if (params.algorithm == AlgorithmKind::QLSA) {
+        device_actions.allocate(host_actions.size(), "cudaMalloc(actions)");
+        check_cuda(cudaMemcpy(device_actions.get(), host_actions.data(),
+                              host_actions.size() * sizeof(DeviceAction),
+                              cudaMemcpyHostToDevice),
+                   "cudaMemcpy(actions)");
+    }
+
+    DeviceBuffer<int> device_dm;
+    DeviceBuffer<int> device_best_tours;
+    DeviceBuffer<DeviceChainSummary> device_summaries;
     const size_t dm_bytes = dm.raw().size() * sizeof(int);
     const size_t tours_bytes = static_cast<size_t>(params.chains) * n * sizeof(int);
     const size_t summaries_bytes = static_cast<size_t>(params.chains) * sizeof(DeviceChainSummary);
 
-    check_cuda(cudaMalloc(&device_dm, dm_bytes), "cudaMalloc(distance matrix)");
-    check_cuda(cudaMalloc(&device_best_tours, tours_bytes), "cudaMalloc(best tours)");
-    check_cuda(cudaMalloc(&device_summaries, summaries_bytes), "cudaMalloc(chain summaries)");
-    check_cuda(cudaMemcpy(device_dm, dm.raw().data(), dm_bytes, cudaMemcpyHostToDevice),
+    device_dm.allocate(dm.raw().size(), "cudaMalloc(distance matrix)");
+    device_best_tours.allocate(static_cast<size_t>(params.chains) * n,
+                               "cudaMalloc(best tours)");
+    device_summaries.allocate(static_cast<size_t>(params.chains),
+                              "cudaMalloc(chain summaries)");
+    check_cuda(cudaMemcpy(device_dm.get(), dm.raw().data(), dm_bytes, cudaMemcpyHostToDevice),
                "cudaMemcpy(distance matrix)");
 
-    Timer timer;
     const int parallel_reversal = params.cuda_reversal_mode == CudaReversalMode::Parallel ? 1 : 0;
     int candidate_policy = kCandidatePolicyBest;
     if (params.cuda_candidate_policy == CudaCandidatePolicy::Random) {
@@ -1078,56 +1152,71 @@ ParallelResult run_cuda_chains_impl(const DistanceMatrix& dm, const ParallelPara
     } else if (params.cuda_candidate_policy == CudaCandidatePolicy::Hybrid) {
         candidate_policy = kCandidatePolicyHybrid;
     }
+
+    CudaEvent kernel_start("cudaEventCreate(kernel start)");
+    CudaEvent kernel_stop("cudaEventCreate(kernel stop)");
+    check_cuda(cudaEventRecord(kernel_start.get()), "cudaEventRecord(kernel start)");
     if (params.algorithm == AlgorithmKind::SA) {
         if (params.cuda_mode == CudaMode::Candidate) {
             sa_candidate_kernel<<<params.chains, params.cuda_block_size, shared_bytes>>>(
-                device_dm, n, params.chains, iterations, initial_temperature, final_temperature,
+                device_dm.get(), n, params.chains, iterations, initial_temperature, final_temperature,
                 params.base_seed, use_nn, params.cuda_candidates_per_iter, parallel_reversal,
                 candidate_policy,
-                device_best_tours, device_summaries);
+                device_best_tours.get(), device_summaries.get());
         } else {
             sa_kernel<<<params.chains, params.cuda_block_size, shared_bytes>>>(
-                device_dm, n, params.chains, iterations, initial_temperature, final_temperature,
-                params.base_seed, use_nn, device_best_tours, device_summaries);
+                device_dm.get(), n, params.chains, iterations, initial_temperature, final_temperature,
+                params.base_seed, use_nn, device_best_tours.get(), device_summaries.get());
         }
     } else {
         const QLSAParams& qlsa = params.qlsa_params;
         if (params.cuda_mode == CudaMode::Candidate) {
             qlsa_candidate_kernel<<<params.chains, params.cuda_block_size, shared_bytes>>>(
-                device_dm, n, params.chains, iterations, initial_temperature, final_temperature,
+                device_dm.get(), n, params.chains, iterations, initial_temperature, final_temperature,
                 params.base_seed, use_nn, qlsa.alpha, qlsa.gamma, qlsa.epsilon,
                 qlsa.policy == "softmax" ? 1 : 0, qlsa.softmax_temperature,
-                qlsa.state_window, qlsa.delta_scale, device_actions, action_count,
+                qlsa.state_window, qlsa.delta_scale, device_actions.get(), action_count,
                 params.cuda_candidates_per_iter, parallel_reversal, candidate_policy,
-                device_best_tours, device_summaries);
+                device_best_tours.get(), device_summaries.get());
         } else {
             qlsa_kernel<<<params.chains, params.cuda_block_size, shared_bytes>>>(
-                device_dm, n, params.chains, iterations, initial_temperature, final_temperature,
+                device_dm.get(), n, params.chains, iterations, initial_temperature, final_temperature,
                 params.base_seed, use_nn, qlsa.alpha, qlsa.gamma, qlsa.epsilon,
                 qlsa.policy == "softmax" ? 1 : 0, qlsa.softmax_temperature,
-                qlsa.state_window, qlsa.delta_scale, device_actions, action_count,
-                device_best_tours, device_summaries);
+                qlsa.state_window, qlsa.delta_scale, device_actions.get(), action_count,
+                device_best_tours.get(), device_summaries.get());
         }
     }
     check_cuda(cudaGetLastError(), "CUDA kernel launch");
-    check_cuda(cudaDeviceSynchronize(), "CUDA kernel execution");
-    const double elapsed_ms = timer.elapsed_ms();
+    check_cuda(cudaEventRecord(kernel_stop.get()), "cudaEventRecord(kernel stop)");
+    check_cuda(cudaEventSynchronize(kernel_stop.get()), "CUDA kernel execution");
+    float kernel_elapsed_ms = 0.0F;
+    check_cuda(cudaEventElapsedTime(&kernel_elapsed_ms, kernel_start.get(), kernel_stop.get()),
+               "cudaEventElapsedTime(kernel)");
 
     std::vector<int> host_best_tours(static_cast<size_t>(params.chains) * n);
     std::vector<DeviceChainSummary> host_summaries(static_cast<size_t>(params.chains));
-    check_cuda(cudaMemcpy(host_best_tours.data(), device_best_tours, tours_bytes, cudaMemcpyDeviceToHost),
+    check_cuda(cudaMemcpy(host_best_tours.data(), device_best_tours.get(), tours_bytes,
+                          cudaMemcpyDeviceToHost),
                "cudaMemcpy(best tours)");
-    check_cuda(cudaMemcpy(host_summaries.data(), device_summaries, summaries_bytes, cudaMemcpyDeviceToHost),
+    check_cuda(cudaMemcpy(host_summaries.data(), device_summaries.get(), summaries_bytes,
+                          cudaMemcpyDeviceToHost),
                "cudaMemcpy(chain summaries)");
 
-    cudaFree(device_dm);
-    cudaFree(device_best_tours);
-    cudaFree(device_summaries);
-    if (device_actions != nullptr) {
-        cudaFree(device_actions);
-    }
+    device_dm.release("cudaFree(distance matrix)");
+    device_best_tours.release("cudaFree(best tours)");
+    device_summaries.release("cudaFree(chain summaries)");
+    device_actions.release("cudaFree(actions)");
+    kernel_start.release("cudaEventDestroy(kernel start)");
+    kernel_stop.release("cudaEventDestroy(kernel stop)");
 
-    return build_parallel_result(dm, params, host_best_tours, host_summaries, elapsed_ms);
+    ParallelResult result = build_parallel_result(dm, params, host_best_tours, host_summaries);
+    result.requested_backend = ParallelBackend::Cuda;
+    result.actual_backend = ParallelBackend::Cuda;
+    result.cuda_kernel_elapsed_ms = static_cast<double>(kernel_elapsed_ms);
+    result.total_elapsed_ms = total_timer.elapsed_ms();
+    result.elapsed_ms = result.total_elapsed_ms;
+    return result;
 }
 
 }  // namespace tsp

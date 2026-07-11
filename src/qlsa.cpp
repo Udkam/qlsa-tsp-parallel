@@ -1,6 +1,7 @@
 #include "tsp/qlsa.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <numeric>
@@ -177,6 +178,60 @@ int diversity_state(const Tour& current, const Tour& best, double threshold) {
     return diversity >= threshold ? 1 : 0;
 }
 
+constexpr int kCandidateLeaderActionCount = 4;
+enum CandidateLeaderAction {
+    Current = 0,
+    GlobalBest = 1,
+    Random = 2,
+    DoubleBridge = 3,
+};
+
+void validate_chunk_options(const SearchChunkOptions& options) {
+    if (options.max_iterations < 0) {
+        throw std::invalid_argument("chunk max_iterations must be non-negative");
+    }
+    if (options.time_limit_ms.has_value() && *options.time_limit_ms < 0) {
+        throw std::invalid_argument("time_limit_ms must be non-negative");
+    }
+    if (options.deadline_check_interval <= 0) {
+        throw std::invalid_argument("deadline_check_interval must be positive");
+    }
+}
+
+std::optional<SearchClock::time_point> effective_deadline(const SearchChunkOptions& options) {
+    std::optional<SearchClock::time_point> deadline = options.deadline;
+    if (!options.time_limit_ms.has_value()) {
+        return deadline;
+    }
+
+    const SearchClock::time_point now = SearchClock::now();
+    const auto max_delta =
+        std::chrono::duration_cast<std::chrono::milliseconds>(SearchClock::time_point::max() - now);
+    const SearchClock::time_point relative_deadline =
+        *options.time_limit_ms >= max_delta.count()
+            ? SearchClock::time_point::max()
+            : now + std::chrono::milliseconds(*options.time_limit_ms);
+    if (!deadline.has_value() || relative_deadline < *deadline) {
+        deadline = relative_deadline;
+    }
+    return deadline;
+}
+
+void verify_qlsa_state(const DistanceMatrix& dm, const QLSAState& state) {
+    if (!state.initialized) {
+        throw std::invalid_argument("QLSA state is not initialized");
+    }
+    if (state.params.sa.iterations < state.iterations_completed) {
+        throw std::runtime_error("QLSA state exceeded its iteration budget");
+    }
+    if (tour_length(state.best_tour, dm) != state.best_length) {
+        throw std::runtime_error("QLSA best_length verification failed");
+    }
+    if (tour_length(state.current_tour, dm) != state.current_length) {
+        throw std::runtime_error("QLSA final_length verification failed");
+    }
+}
+
 }  // namespace
 
 std::vector<QLSAAction> default_qlsa_actions() {
@@ -273,222 +328,263 @@ int select_qlsa_action(const std::vector<double>& q_values, const QLSAParams& pa
     throw std::invalid_argument("QLSA policy must be epsilon-greedy or softmax");
 }
 
-QLSAResult run_qlsa_current(const DistanceMatrix& dm, const QLSAParams& params) {
-    const int n = dm.size();
-    if (n <= 0) {
+QLSAState initialize_qlsa_state(const DistanceMatrix& dm, const QLSAParams& params) {
+    validate_params(params);
+    if (dm.size() <= 0) {
         throw std::invalid_argument("run_qlsa_2opt requires a non-empty distance matrix");
     }
-
-    const std::vector<QLSAAction> actions = normalized_actions(params);
-    std::vector<std::vector<double>> q_table(
-        kQLSAStateCount, std::vector<double>(actions.size(), 0.0));
-
     Timer timer;
-    Rng rng(params.sa.seed);
 
-    Tour current = params.sa.use_nearest_neighbor_init ? nearest_neighbor_tour(dm) : random_tour(n, rng);
-    int current_length = tour_length(current, dm);
-    Tour best = current;
-    int best_length = current_length;
+    QLSAState state;
+    state.params = params;
+    state.rng = Rng(params.sa.seed);
+    state.current_tour = params.sa.use_nearest_neighbor_init
+                             ? nearest_neighbor_tour(dm)
+                             : random_tour(dm.size(), state.rng);
+    state.current_length = tour_length(state.current_tour, dm);
+    state.best_tour = state.current_tour;
+    state.best_length = state.current_length;
+    state.temperature = params.sa.initial_temperature;
+    state.temperature_decay =
+        params.sa.iterations > 0
+            ? std::pow(params.sa.final_temperature / params.sa.initial_temperature,
+                       1.0 / static_cast<double>(params.sa.iterations))
+            : 1.0;
 
+    if (params.variant == "current") {
+        state.actions = normalized_actions(params);
+        state.q_table.assign(static_cast<size_t>(kQLSAStateCount),
+                             std::vector<double>(state.actions.size(), 0.0));
+        state.action_counts.assign(state.actions.size(), 0);
+        state.recent_deltas.reserve(static_cast<size_t>(params.state_window));
+        state.learning_state = qlsa_state_from_average_delta(0.0, params.delta_scale);
+    } else {
+        const int state_count = params.variant == "paper-sb" ? 2 : 1;
+        state.q_table.assign(static_cast<size_t>(state_count),
+                             std::vector<double>(static_cast<size_t>(kCandidateLeaderActionCount),
+                                                 0.0));
+        state.action_counts.assign(static_cast<size_t>(kCandidateLeaderActionCount), 0);
+        state.learning_state = params.variant == "paper-sb"
+                                   ? diversity_state(state.current_tour,
+                                                     state.best_tour,
+                                                     params.diversity_threshold)
+                                   : 0;
+    }
+
+    state.initialized = true;
+    state.elapsed_ms = timer.elapsed_ms();
+    return state;
+}
+
+SearchChunkProgress run_qlsa_chunk(const DistanceMatrix& dm,
+                                   QLSAState& state,
+                                   const SearchChunkOptions& options) {
+    validate_chunk_options(options);
+    if (!state.initialized) {
+        throw std::invalid_argument("QLSA state is not initialized");
+    }
+    if (static_cast<int>(state.current_tour.size()) != dm.size() ||
+        static_cast<int>(state.best_tour.size()) != dm.size()) {
+        throw std::invalid_argument("QLSA state does not match the distance matrix");
+    }
+
+    SearchChunkProgress progress;
+    const int64_t remaining = state.params.sa.iterations - state.iterations_completed;
+    if (remaining < 0) {
+        throw std::runtime_error("QLSA state exceeded its iteration budget");
+    }
+    progress.iterations_requested = std::min(options.max_iterations, remaining);
+    const std::optional<SearchClock::time_point> deadline = effective_deadline(options);
+    Timer timer;
+    const int n = dm.size();
+
+    while (n >= 3 && progress.iterations_completed < progress.iterations_requested) {
+        if (deadline.has_value() &&
+            progress.iterations_completed % options.deadline_check_interval == 0 &&
+            SearchClock::now() >= *deadline) {
+            progress.deadline_reached = true;
+            state.deadline_reached = true;
+            break;
+        }
+
+        if (state.params.variant == "current") {
+            const int action_index =
+                select_qlsa_action(state.q_table[static_cast<size_t>(state.learning_state)],
+                                   state.params,
+                                   state.rng);
+            ++state.action_counts[static_cast<size_t>(action_index)];
+            const Move move = sample_move_for_action(
+                n, state.actions[static_cast<size_t>(action_index)], state.rng);
+            const int delta = delta_2opt(state.current_tour, dm, move.i, move.k);
+
+            bool accept = delta < 0;
+            if (!accept) {
+                const double probability =
+                    std::exp(-static_cast<double>(delta) / state.temperature);
+                accept = state.rng.uniform01() < probability;
+            }
+            if (accept) {
+                apply_2opt(state.current_tour, move.i, move.k);
+                state.current_length += delta;
+                ++state.accepted_moves;
+                if (delta < 0) {
+                    ++state.improved_moves;
+                }
+                if (state.current_length < state.best_length) {
+                    state.best_length = state.current_length;
+                    state.best_tour = state.current_tour;
+                }
+            }
+
+            state.recent_deltas.push_back(delta);
+            state.recent_delta_sum += static_cast<double>(delta);
+            if (static_cast<int>(state.recent_deltas.size()) > state.params.state_window) {
+                state.recent_delta_sum -= static_cast<double>(state.recent_deltas.front());
+                state.recent_deltas.erase(state.recent_deltas.begin());
+            }
+            const double average_delta =
+                state.recent_delta_sum / static_cast<double>(state.recent_deltas.size());
+            const int next_state =
+                qlsa_state_from_average_delta(average_delta, state.params.delta_scale);
+            update_q_value(state.q_table,
+                           state.learning_state,
+                           action_index,
+                           next_state,
+                           qlsa_reward_from_delta(delta, accept),
+                           state.params.alpha,
+                           state.params.gamma);
+            state.learning_state = next_state;
+        } else {
+            const int action_index =
+                select_qlsa_action(state.q_table[static_cast<size_t>(state.learning_state)],
+                                   state.params,
+                                   state.rng);
+            ++state.action_counts[static_cast<size_t>(action_index)];
+
+            Tour leader;
+            int leader_length = 0;
+            switch (action_index) {
+                case Current:
+                    leader = state.current_tour;
+                    leader_length = state.current_length;
+                    break;
+                case GlobalBest:
+                    leader = state.best_tour;
+                    leader_length = state.best_length;
+                    break;
+                case Random:
+                    leader = random_tour(n, state.rng);
+                    leader_length = tour_length(leader, dm);
+                    break;
+                case DoubleBridge:
+                    leader = double_bridge(state.current_tour, state.rng);
+                    leader_length = tour_length(leader, dm);
+                    break;
+                default:
+                    throw std::runtime_error("invalid candidate-leader action");
+            }
+
+            const int previous_length = state.current_length;
+            const int candidate_length = apply_one_2opt_metropolis(
+                leader, leader_length, dm, state.temperature, state.rng);
+            const int total_delta = candidate_length - state.current_length;
+            bool accept = total_delta <= 0;
+            if (!accept) {
+                accept = state.rng.uniform01() <
+                         std::exp(-static_cast<double>(total_delta) /
+                                  std::max(state.temperature, 1e-12));
+            }
+            if (accept) {
+                state.current_tour = std::move(leader);
+                state.current_length = candidate_length;
+                ++state.accepted_moves;
+                if (state.current_length < previous_length) {
+                    ++state.improved_moves;
+                }
+                if (state.current_length < state.best_length) {
+                    state.best_length = state.current_length;
+                    state.best_tour = state.current_tour;
+                }
+            }
+
+            const double reward = std::max(0, previous_length - state.current_length);
+            const int next_state = state.params.variant == "paper-sb"
+                                       ? diversity_state(state.current_tour,
+                                                         state.best_tour,
+                                                         state.params.diversity_threshold)
+                                       : 0;
+            update_q_value(state.q_table,
+                           state.learning_state,
+                           action_index,
+                           next_state,
+                           reward,
+                           state.params.alpha,
+                           state.params.gamma);
+            state.learning_state = next_state;
+        }
+
+        state.temperature *= state.temperature_decay;
+        ++state.iterations_completed;
+        ++progress.iterations_completed;
+    }
+
+    state.elapsed_ms += timer.elapsed_ms();
+    progress.total_iterations_completed = state.iterations_completed;
+    progress.iteration_budget_exhausted =
+        n < 3 || state.iterations_completed >= state.params.sa.iterations;
+    return progress;
+}
+
+QLSAResult finalize_qlsa_state(const DistanceMatrix& dm, const QLSAState& state) {
+    verify_qlsa_state(dm, state);
     QLSAResult result;
-    result.action_counts.assign(actions.size(), 0);
-
-    double temperature = params.sa.initial_temperature;
-    const double temp_decay = (params.sa.iterations > 0)
-                                  ? std::pow(params.sa.final_temperature / params.sa.initial_temperature,
-                                             1.0 / static_cast<double>(params.sa.iterations))
-                                  : 1.0;
-
-    std::vector<int> recent_deltas;
-    recent_deltas.reserve(static_cast<size_t>(params.state_window));
-    double recent_sum = 0.0;
-    int state = qlsa_state_from_average_delta(0.0, params.delta_scale);
-
-    for (int64_t iter = 0; n >= 3 && iter < params.sa.iterations; ++iter) {
-        const int action_index = select_qlsa_action(q_table[static_cast<size_t>(state)], params, rng);
-        ++result.action_counts[static_cast<size_t>(action_index)];
-
-        const Move move = sample_move_for_action(n, actions[static_cast<size_t>(action_index)], rng);
-        const int delta = delta_2opt(current, dm, move.i, move.k);
-
-        bool accept = delta < 0;
-        if (!accept) {
-            const double probability = std::exp(-static_cast<double>(delta) / temperature);
-            accept = rng.uniform01() < probability;
-        }
-
-        if (accept) {
-            apply_2opt(current, move.i, move.k);
-            current_length += delta;
-            ++result.accepted_moves;
-
-            if (delta < 0) {
-                ++result.improved_moves;
-            }
-            if (current_length < best_length) {
-                best_length = current_length;
-                best = current;
-            }
-        }
-
-        recent_deltas.push_back(delta);
-        recent_sum += static_cast<double>(delta);
-        if (static_cast<int>(recent_deltas.size()) > params.state_window) {
-            recent_sum -= static_cast<double>(recent_deltas.front());
-            recent_deltas.erase(recent_deltas.begin());
-        }
-
-        const double average_delta = recent_sum / static_cast<double>(recent_deltas.size());
-        const int next_state = qlsa_state_from_average_delta(average_delta, params.delta_scale);
-        const double reward = qlsa_reward_from_delta(delta, accept);
-        update_q_value(q_table, state, action_index, next_state, reward, params.alpha, params.gamma);
-        state = next_state;
-
-        temperature *= temp_decay;
-    }
-
-    const int checked_best_length = tour_length(best, dm);
-    if (checked_best_length != best_length) {
-        throw std::runtime_error("QLSA best_length verification failed");
-    }
-    const int checked_final_length = tour_length(current, dm);
-    if (checked_final_length != current_length) {
-        throw std::runtime_error("QLSA final_length verification failed");
-    }
-
-    result.best_tour = std::move(best);
-    result.best_length = best_length;
-    result.final_length = current_length;
-    result.elapsed_ms = timer.elapsed_ms();
-    result.q_table = std::move(q_table);
+    result.best_tour = state.best_tour;
+    result.best_length = state.best_length;
+    result.final_length = state.current_length;
+    result.elapsed_ms = state.elapsed_ms;
+    result.accepted_moves = state.accepted_moves;
+    result.improved_moves = state.improved_moves;
+    result.iterations_completed = state.iterations_completed;
+    result.deadline_reached = state.deadline_reached;
+    result.q_table = state.q_table;
+    result.action_counts = state.action_counts;
     return result;
 }
 
-QLSAResult run_qlsa_paper_style(const DistanceMatrix& dm, const QLSAParams& params) {
-    const int n = dm.size();
-    if (n <= 0) {
-        throw std::invalid_argument("run_qlsa_2opt requires a non-empty distance matrix");
+bool migrate_qlsa_tour(const DistanceMatrix& dm, QLSAState& state, const Tour& migrant) {
+    if (!state.initialized) {
+        throw std::invalid_argument("QLSA state is not initialized");
     }
-
-    const int state_count = (params.variant == "paper-sb") ? 2 : 1;
-    constexpr int kCandidateLeaderActionCount = 4;
-    enum CandidateLeaderAction {
-        Current = 0,
-        GlobalBest = 1,
-        Random = 2,
-        DoubleBridge = 3,
-    };
-
-    std::vector<std::vector<double>> q_table(
-        static_cast<size_t>(state_count),
-        std::vector<double>(static_cast<size_t>(kCandidateLeaderActionCount), 0.0));
-
-    Timer timer;
-    Rng rng(params.sa.seed);
-
-    Tour current = params.sa.use_nearest_neighbor_init ? nearest_neighbor_tour(dm) : random_tour(n, rng);
-    int current_length = tour_length(current, dm);
-    Tour best = current;
-    int best_length = current_length;
-
-    QLSAResult result;
-    result.action_counts.assign(static_cast<size_t>(kCandidateLeaderActionCount), 0);
-
-    double temperature = params.sa.initial_temperature;
-    const double temp_decay = (params.sa.iterations > 0)
-                                  ? std::pow(params.sa.final_temperature / params.sa.initial_temperature,
-                                             1.0 / static_cast<double>(params.sa.iterations))
-                                  : 1.0;
-
-    int state = (params.variant == "paper-sb")
-                    ? diversity_state(current, best, params.diversity_threshold)
-                    : 0;
-
-    for (int64_t iter = 0; n >= 3 && iter < params.sa.iterations; ++iter) {
-        const int action_index = select_qlsa_action(q_table[static_cast<size_t>(state)], params, rng);
-        ++result.action_counts[static_cast<size_t>(action_index)];
-
-        Tour leader;
-        int leader_length = 0;
-        switch (action_index) {
-            case Current:
-                leader = current;
-                leader_length = current_length;
-                break;
-            case GlobalBest:
-                leader = best;
-                leader_length = best_length;
-                break;
-            case Random:
-                leader = random_tour(n, rng);
-                leader_length = tour_length(leader, dm);
-                break;
-            case DoubleBridge:
-                leader = double_bridge(current, rng);
-                leader_length = tour_length(leader, dm);
-                break;
-            default:
-                throw std::runtime_error("invalid candidate-leader action");
-        }
-
-        const int previous_length = current_length;
-        const int candidate_length =
-            apply_one_2opt_metropolis(leader, leader_length, dm, temperature, rng);
-        const int total_delta = candidate_length - current_length;
-
-        bool accept = total_delta <= 0;
-        if (!accept) {
-            accept = rng.uniform01() < std::exp(-static_cast<double>(total_delta) /
-                                                std::max(temperature, 1e-12));
-        }
-
-        if (accept) {
-            current = std::move(leader);
-            current_length = candidate_length;
-            ++result.accepted_moves;
-            if (current_length < previous_length) {
-                ++result.improved_moves;
-            }
-            if (current_length < best_length) {
-                best_length = current_length;
-                best = current;
-            }
-        }
-
-        const double reward = std::max(0, previous_length - current_length);
-        const int next_state = (params.variant == "paper-sb")
-                                   ? diversity_state(current, best, params.diversity_threshold)
-                                   : 0;
-        update_q_value(q_table, state, action_index, next_state, reward, params.alpha, params.gamma);
-        state = next_state;
-
-        temperature *= temp_decay;
+    if (!is_valid_tour(migrant, dm.size())) {
+        throw std::invalid_argument("QLSA migrant must be a legal tour");
     }
-
-    const int checked_best_length = tour_length(best, dm);
-    if (checked_best_length != best_length) {
-        throw std::runtime_error("QLSA paper-style best_length verification failed");
+    const int migrant_length = tour_length(migrant, dm);
+    if (migrant_length >= state.current_length) {
+        return false;
     }
-    const int checked_final_length = tour_length(current, dm);
-    if (checked_final_length != current_length) {
-        throw std::runtime_error("QLSA paper-style final_length verification failed");
+    state.current_tour = migrant;
+    state.current_length = migrant_length;
+    if (migrant_length < state.best_length) {
+        state.best_tour = migrant;
+        state.best_length = migrant_length;
     }
-
-    result.best_tour = std::move(best);
-    result.best_length = best_length;
-    result.final_length = current_length;
-    result.elapsed_ms = timer.elapsed_ms();
-    result.q_table = std::move(q_table);
-    return result;
+    if (state.params.variant == "paper-sb") {
+        state.learning_state = diversity_state(state.current_tour,
+                                               state.best_tour,
+                                               state.params.diversity_threshold);
+    }
+    return true;
 }
 
 QLSAResult run_qlsa_2opt(const DistanceMatrix& dm, const QLSAParams& params) {
-    validate_params(params);
-    if (params.variant == "current") {
-        return run_qlsa_current(dm, params);
-    }
-    return run_qlsa_paper_style(dm, params);
+    Timer timer;
+    QLSAState state = initialize_qlsa_state(dm, params);
+    SearchChunkOptions options;
+    options.max_iterations = params.sa.iterations;
+    (void)run_qlsa_chunk(dm, state, options);
+    QLSAResult result = finalize_qlsa_state(dm, state);
+    result.elapsed_ms = timer.elapsed_ms();
+    return result;
 }
 
 }  // namespace tsp

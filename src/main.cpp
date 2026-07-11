@@ -1,20 +1,24 @@
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "tsp/distance_matrix.hpp"
 #include "tsp/cuda.hpp"
+#include "tsp/island.hpp"
 #include "tsp/metrics.hpp"
 #include "tsp/parallel.hpp"
 #include "tsp/qlsa.hpp"
 #include "tsp/sa.hpp"
+#include "tsp/timer.hpp"
 #include "tsp/tsplib_parser.hpp"
 #include "tsp/tour.hpp"
 
@@ -44,6 +48,9 @@ struct CliOptions {
     std::string qlsa_policy = "epsilon-greedy";
     std::string qlsa_variant = "current";
     double qlsa_diversity_threshold = 0.5;
+    std::optional<int64_t> time_limit_ms;
+    std::string migration_topology = "disabled";
+    int64_t migration_interval = 10000;
 };
 
 void print_usage(const char* program) {
@@ -57,7 +64,11 @@ void print_usage(const char* program) {
         << "       " << program
         << " --input data/berlin52.tsp --parallel omp --chains 8 --threads 4 --iterations 1000000 --seed 1\n"
         << "       " << program
-        << " --input data/berlin52.tsp --qlsa --parallel cuda --chains 32 --cuda_block_size 128 --iterations 1000000 --seed 1\n";
+        << " --input data/berlin52.tsp --qlsa --parallel cuda --chains 32 --cuda_block_size 128 --iterations 1000000 --seed 1\n"
+        << "       " << program
+        << " --input data/eil101.tsp --parallel omp --chains 8 --threads 8 --iterations 1000000000 --time-limit-ms 30000\n"
+        << "       " << program
+        << " --input data/eil101.tsp --parallel omp --chains 8 --threads 8 --migration-topology ring --migration-interval 10000\n";
     std::cerr
         << "CUDA options: --cuda_mode chain|candidate --cuda_candidates_per_iter 32 "
         << "--cuda_reversal_mode serial|parallel --cuda_candidate_policy best|random|hybrid\n";
@@ -120,6 +131,12 @@ CliOptions parse_args(int argc, char** argv) {
             options.qlsa_variant = require_value(arg);
         } else if (arg == "--diversity_threshold") {
             options.qlsa_diversity_threshold = std::stod(require_value(arg));
+        } else if (arg == "--time-limit-ms") {
+            options.time_limit_ms = std::stoll(require_value(arg));
+        } else if (arg == "--migration-topology") {
+            options.migration_topology = require_value(arg);
+        } else if (arg == "--migration-interval") {
+            options.migration_interval = std::stoll(require_value(arg));
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             std::exit(0);
@@ -187,8 +204,31 @@ CliOptions parse_args(int argc, char** argv) {
     if (options.qlsa_diversity_threshold < 0.0 || options.qlsa_diversity_threshold > 1.0) {
         throw std::invalid_argument("--diversity_threshold must be in [0, 1]");
     }
+    if (options.time_limit_ms.has_value() && *options.time_limit_ms <= 0) {
+        throw std::invalid_argument("--time-limit-ms must be positive");
+    }
+    if (options.migration_topology != "disabled" &&
+        options.migration_topology != "independent" &&
+        options.migration_topology != "ring" &&
+        options.migration_topology != "global") {
+        throw std::invalid_argument(
+            "--migration-topology must be disabled, independent, ring, or global");
+    }
+    if (options.migration_interval <= 0) {
+        throw std::invalid_argument("--migration-interval must be positive");
+    }
     if (options.parallel == "cuda" && options.use_qlsa && options.qlsa_variant != "current") {
         throw std::invalid_argument("CUDA QLSA currently supports --qlsa_variant current only");
+    }
+    if (options.parallel == "cuda" && options.time_limit_ms.has_value()) {
+        throw std::invalid_argument("--time-limit-ms currently supports CPU/OpenMP runs only");
+    }
+    if (options.parallel == "cuda" && options.migration_topology != "disabled") {
+        throw std::invalid_argument("island migration currently supports CPU/OpenMP runs only");
+    }
+    if ((options.migration_topology == "ring" || options.migration_topology == "global") &&
+        options.chains < 2) {
+        throw std::invalid_argument("ring/global migration requires --chains >= 2");
     }
     return options;
 }
@@ -216,12 +256,33 @@ struct RunRow {
     double elapsed_ms = 0.0;
     int64_t accepted_moves = 0;
     int64_t improved_moves = 0;
+    double total_elapsed_ms = 0.0;
+    double cuda_kernel_elapsed_ms = 0.0;
+    std::string requested_backend = "cpu_serial";
+    std::string actual_backend = "cpu_serial";
+    bool backend_fallback = false;
+    std::string backend_fallback_reason;
+    int64_t iterations_completed = 0;
+    bool deadline_reached = false;
+    std::string migration_topology = "disabled";
+    int64_t migration_interval = 0;
+    int64_t migration_rounds = 0;
+    int64_t migration_attempts = 0;
+    int64_t migrations_adopted = 0;
+    int actual_threads = 1;
 };
 
 std::string algorithm_label(const CliOptions& options) {
     std::string base = options.use_qlsa ? "qlsa" : "sa";
     if (options.use_qlsa && options.qlsa_variant != "current") {
         base += "-" + options.qlsa_variant;
+    }
+    if (options.migration_topology != "disabled") {
+        base += "-island-" + options.migration_topology;
+        if (options.parallel == "omp") {
+            base += "-omp";
+        }
+        return base;
     }
     if (options.parallel == "cuda") {
         if (options.cuda_mode == "candidate" && options.cuda_candidate_policy != "best") {
@@ -270,6 +331,26 @@ tsp::QLSAParams make_qlsa_params(const CliOptions& options, const tsp::SAParams&
     return params;
 }
 
+std::string requested_backend_name(const CliOptions& options) {
+    if (options.parallel == "cuda") {
+        return "cuda";
+    }
+    if (options.parallel == "omp") {
+        return "openmp";
+    }
+    return "cpu_serial";
+}
+
+tsp::MigrationTopology migration_topology_from_options(const CliOptions& options) {
+    if (options.migration_topology == "ring") {
+        return tsp::MigrationTopology::Ring;
+    }
+    if (options.migration_topology == "global") {
+        return tsp::MigrationTopology::GlobalBest;
+    }
+    return tsp::MigrationTopology::Independent;
+}
+
 void print_csv_row(const tsp::Instance& instance,
                    const CliOptions& options,
                    uint64_t seed,
@@ -287,7 +368,21 @@ void print_csv_row(const tsp::Instance& instance,
               << row.final_length << ','
               << std::fixed << std::setprecision(3) << row.elapsed_ms << ','
               << row.accepted_moves << ','
-              << row.improved_moves << '\n';
+              << row.improved_moves << ','
+              << std::fixed << std::setprecision(3) << row.total_elapsed_ms << ','
+              << std::fixed << std::setprecision(3) << row.cuda_kernel_elapsed_ms << ','
+              << row.requested_backend << ','
+              << row.actual_backend << ','
+              << (row.backend_fallback ? "true" : "false") << ','
+              << csv_escape(row.backend_fallback_reason) << ','
+              << row.iterations_completed << ','
+              << (row.deadline_reached ? "true" : "false") << ','
+              << row.migration_topology << ','
+              << row.migration_interval << ','
+              << row.migration_rounds << ','
+              << row.migration_attempts << ','
+              << row.migrations_adopted << ','
+              << row.actual_threads << '\n';
 }
 
 void print_human_run(int run_index,
@@ -305,7 +400,19 @@ void print_human_run(int run_index,
               << " final_length=" << row.final_length
               << " elapsed_ms=" << std::fixed << std::setprecision(3) << row.elapsed_ms
               << " accepted=" << row.accepted_moves
-              << " improved=" << row.improved_moves << '\n';
+              << " improved=" << row.improved_moves
+              << " iterations_completed=" << row.iterations_completed
+              << " requested_backend=" << row.requested_backend
+              << " actual_backend=" << row.actual_backend
+              << " actual_threads=" << row.actual_threads
+              << " deadline_reached=" << (row.deadline_reached ? "true" : "false");
+    if (row.migration_topology != "disabled") {
+        std::cout << " migration_topology=" << row.migration_topology
+                  << " migration_rounds=" << row.migration_rounds
+                  << " migrations_adopted=" << row.migrations_adopted
+                  << '/' << row.migration_attempts;
+    }
+    std::cout << '\n';
 }
 
 RunRow row_from_sa_result(const std::string& algorithm, const tsp::SAResult& result) {
@@ -314,8 +421,11 @@ RunRow row_from_sa_result(const std::string& algorithm, const tsp::SAResult& res
     row.best_length = result.best_length;
     row.final_length = result.final_length;
     row.elapsed_ms = result.elapsed_ms;
+    row.total_elapsed_ms = result.elapsed_ms;
     row.accepted_moves = result.accepted_moves;
     row.improved_moves = result.improved_moves;
+    row.iterations_completed = result.iterations_completed;
+    row.deadline_reached = result.deadline_reached;
     return row;
 }
 
@@ -325,20 +435,104 @@ RunRow row_from_qlsa_result(const std::string& algorithm, const tsp::QLSAResult&
     row.best_length = result.best_length;
     row.final_length = result.final_length;
     row.elapsed_ms = result.elapsed_ms;
+    row.total_elapsed_ms = result.elapsed_ms;
     row.accepted_moves = result.accepted_moves;
     row.improved_moves = result.improved_moves;
+    row.iterations_completed = result.iterations_completed;
+    row.deadline_reached = result.deadline_reached;
     return row;
 }
 
-RunRow row_from_parallel_result(const std::string& algorithm, const tsp::ParallelResult& result) {
+RunRow row_from_parallel_result(const std::string& algorithm,
+                                const tsp::ParallelResult& result) {
     RunRow row;
     row.algorithm = algorithm;
     row.best_length = result.best_length;
     row.final_length = result.final_length_of_best_chain;
     row.elapsed_ms = result.elapsed_ms;
+    row.total_elapsed_ms = result.total_elapsed_ms;
+    row.cuda_kernel_elapsed_ms = result.cuda_kernel_elapsed_ms;
+    row.requested_backend = tsp::parallel_backend_name(result.requested_backend);
+    row.actual_backend = tsp::parallel_backend_name(result.actual_backend);
+    row.backend_fallback = result.backend_fallback;
+    row.backend_fallback_reason = result.backend_fallback_reason;
     row.accepted_moves = result.total_accepted_moves;
     row.improved_moves = result.total_improved_moves;
+    row.iterations_completed = result.total_iterations_completed;
+    row.deadline_reached = result.deadline_reached;
+    row.actual_threads = result.actual_threads;
     return row;
+}
+
+RunRow row_from_island_result(const std::string& algorithm,
+                              const CliOptions& options,
+                              const tsp::IslandResult& result) {
+    RunRow row;
+    row.algorithm = algorithm;
+    row.best_length = result.best_length;
+    row.final_length = result.final_length_of_best_island;
+    row.elapsed_ms = result.elapsed_ms;
+    row.total_elapsed_ms = result.elapsed_ms;
+    row.accepted_moves = result.total_accepted_moves;
+    row.improved_moves = result.total_improved_moves;
+    row.requested_backend = requested_backend_name(options);
+    row.actual_backend = result.used_openmp ? "openmp" : "cpu_serial";
+    row.backend_fallback = row.requested_backend != row.actual_backend;
+    if (row.backend_fallback) {
+        row.backend_fallback_reason =
+            "OpenMP was requested but the island run executed on the serial CPU backend";
+    }
+    row.iterations_completed = result.total_iterations_completed;
+    row.deadline_reached = result.deadline_reached;
+    row.migration_topology = options.migration_topology == "disabled"
+                                 ? "independent"
+                                 : options.migration_topology;
+    row.migration_interval = options.migration_interval;
+    row.migration_rounds = result.migration_rounds;
+    row.migration_attempts = result.migration_attempts;
+    row.migrations_adopted = result.migrations_adopted;
+    row.actual_threads = result.actual_threads;
+    return row;
+}
+
+tsp::SearchClock::time_point saturated_deadline_after_ms(int64_t time_limit_ms) {
+    const auto now = tsp::SearchClock::now();
+    const auto maximum_delta = std::chrono::duration_cast<std::chrono::milliseconds>(
+        tsp::SearchClock::time_point::max() - now);
+    if (time_limit_ms >= maximum_delta.count()) {
+        return tsp::SearchClock::time_point::max();
+    }
+    return now + std::chrono::milliseconds(time_limit_ms);
+}
+
+tsp::SAResult run_time_limited_sa(const tsp::DistanceMatrix& dm,
+                                  const tsp::SAParams& params,
+                                  int64_t time_limit_ms) {
+    tsp::Timer timer;
+    const auto deadline = saturated_deadline_after_ms(time_limit_ms);
+    tsp::SAState state = tsp::initialize_sa_state(dm, params);
+    tsp::SearchChunkOptions chunk;
+    chunk.max_iterations = params.iterations;
+    chunk.deadline = deadline;
+    (void)tsp::run_sa_chunk(dm, state, chunk);
+    tsp::SAResult result = tsp::finalize_sa_state(dm, state);
+    result.elapsed_ms = timer.elapsed_ms();
+    return result;
+}
+
+tsp::QLSAResult run_time_limited_qlsa(const tsp::DistanceMatrix& dm,
+                                      const tsp::QLSAParams& params,
+                                      int64_t time_limit_ms) {
+    tsp::Timer timer;
+    const auto deadline = saturated_deadline_after_ms(time_limit_ms);
+    tsp::QLSAState state = tsp::initialize_qlsa_state(dm, params);
+    tsp::SearchChunkOptions chunk;
+    chunk.max_iterations = params.sa.iterations;
+    chunk.deadline = deadline;
+    (void)tsp::run_qlsa_chunk(dm, state, chunk);
+    tsp::QLSAResult result = tsp::finalize_qlsa_state(dm, state);
+    result.elapsed_ms = timer.elapsed_ms();
+    return result;
 }
 
 }  // namespace
@@ -353,10 +547,6 @@ int main(int argc, char** argv) {
         if (options.parallel == "omp" && !tsp::openmp_available()) {
             std::cerr << "Warning: OpenMP was not enabled at build time; falling back to serial multi-chain execution.\n";
         }
-        if (options.parallel == "cuda" && !tsp::cuda_available()) {
-            std::cerr << "Warning: CUDA is not available at runtime; falling back to serial multi-chain execution.\n";
-        }
-
         if (!options.csv_only) {
             std::cout << "Instance: " << instance.name << " (n=" << instance.dimension << ")\n";
             std::cout << "Input: " << std::filesystem::path(options.input).generic_string() << '\n';
@@ -371,6 +561,13 @@ int main(int argc, char** argv) {
                           << " cuda_reversal_mode=" << options.cuda_reversal_mode
                           << " cuda_candidate_policy=" << options.cuda_candidate_policy;
             }
+            if (options.time_limit_ms.has_value()) {
+                std::cout << " time_limit_ms=" << *options.time_limit_ms;
+            }
+            if (options.migration_topology != "disabled") {
+                std::cout << " migration_topology=" << options.migration_topology
+                          << " migration_interval=" << options.migration_interval;
+            }
             std::cout << '\n';
             if (options.use_qlsa) {
                 std::cout << "QLSA params: alpha=" << options.qlsa_alpha
@@ -380,7 +577,13 @@ int main(int argc, char** argv) {
                           << " variant=" << options.qlsa_variant
                           << " diversity_threshold=" << options.qlsa_diversity_threshold << '\n';
             }
-            std::cout << "CSV: algorithm,instance,dimension,iterations,seed,init,chains,threads,parallel,best_length,final_length,elapsed_ms,accepted_moves,improved_moves\n";
+            std::cout
+                << "CSV: algorithm,instance,dimension,iterations,seed,init,chains,threads,parallel,"
+                   "best_length,final_length,elapsed_ms,accepted_moves,improved_moves,total_elapsed_ms,"
+                   "cuda_kernel_elapsed_ms,requested_backend,actual_backend,backend_fallback,"
+                   "backend_fallback_reason,iterations_completed,deadline_reached,migration_topology,"
+                   "migration_interval,migration_rounds,migration_attempts,migrations_adopted,"
+                   "actual_threads\n";
         }
 
         std::vector<double> elapsed_values;
@@ -394,7 +597,31 @@ int main(int argc, char** argv) {
             const tsp::SAParams sa_params = make_sa_params(options, run_seed);
             RunRow row;
 
-            if (options.parallel == "omp" || options.parallel == "cuda" || options.chains > 1) {
+            const bool explicit_island = options.migration_topology != "disabled";
+            const bool time_limited_multichain =
+                options.time_limit_ms.has_value() &&
+                (options.parallel == "omp" || options.chains > 1);
+
+            if (explicit_island || time_limited_multichain) {
+                tsp::IslandParams island_params;
+                island_params.algorithm = options.use_qlsa
+                                              ? tsp::IslandAlgorithm::QLSA
+                                              : tsp::IslandAlgorithm::SA;
+                island_params.sa_params = sa_params;
+                island_params.qlsa_params = make_qlsa_params(options, sa_params);
+                island_params.island_count = options.chains;
+                island_params.threads = options.parallel == "omp" ? options.threads : 1;
+                island_params.migration_interval = options.migration_interval;
+                island_params.base_seed = run_seed;
+                island_params.time_limit_ms = options.time_limit_ms;
+                const tsp::IslandResult result = tsp::run_openmp_islands(
+                    dm, island_params, migration_topology_from_options(options));
+                if (!tsp::is_valid_tour(result.best_tour, dm.size())) {
+                    throw std::runtime_error("island run returned an invalid best tour");
+                }
+                row = row_from_island_result(algorithm, options, result);
+            } else if (options.parallel == "omp" || options.parallel == "cuda" ||
+                       options.chains > 1) {
                 tsp::ParallelParams parallel_params;
                 parallel_params.algorithm = options.use_qlsa ? tsp::AlgorithmKind::QLSA : tsp::AlgorithmKind::SA;
                 parallel_params.sa_params = sa_params;
@@ -426,13 +653,19 @@ int main(int argc, char** argv) {
                 row = row_from_parallel_result(algorithm, result);
             } else if (options.use_qlsa) {
                 const tsp::QLSAParams qlsa_params = make_qlsa_params(options, sa_params);
-                const tsp::QLSAResult result = tsp::run_qlsa_2opt(dm, qlsa_params);
+                const tsp::QLSAResult result = options.time_limit_ms.has_value()
+                                                   ? run_time_limited_qlsa(
+                                                         dm, qlsa_params, *options.time_limit_ms)
+                                                   : tsp::run_qlsa_2opt(dm, qlsa_params);
                 if (!tsp::is_valid_tour(result.best_tour, dm.size())) {
                     throw std::runtime_error("QLSA returned an invalid best tour");
                 }
                 row = row_from_qlsa_result(algorithm, result);
             } else {
-                const tsp::SAResult result = tsp::run_sa_2opt(dm, sa_params);
+                const tsp::SAResult result = options.time_limit_ms.has_value()
+                                                 ? run_time_limited_sa(
+                                                       dm, sa_params, *options.time_limit_ms)
+                                                 : tsp::run_sa_2opt(dm, sa_params);
                 if (!tsp::is_valid_tour(result.best_tour, dm.size())) {
                     throw std::runtime_error("SA returned an invalid best tour");
                 }

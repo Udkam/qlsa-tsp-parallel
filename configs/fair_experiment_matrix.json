@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "experiment_name": "paired_fair_comparison_v1",
+  "description": "Paired-seed comparison of SA and three QLSA variants under equal search-iteration and fixed solver-wall-time budgets.",
+  "proposal_accounting_note": "One proposal is one candidate accepted/rejected per chain iteration; this normalizes search decisions, not the different internal cost of constructing each candidate.",
+  "default_budget": "equal-iterations",
+  "instances": [
+    {
+      "name": "eil76",
+      "path": "data/eil76.tsp",
+      "bks": 538
+    },
+    {
+      "name": "rat99",
+      "path": "data/rat99.tsp",
+      "bks": 1211
+    },
+    {
+      "name": "eil101",
+      "path": "data/eil101.tsp",
+      "bks": 629
+    },
+    {
+      "name": "a280",
+      "path": "data/a280.tsp",
+      "bks": 2579
+    },
+    {
+      "name": "rat575",
+      "path": "data/rat575.tsp",
+      "bks": 6773
+    }
+  ],
+  "algorithms": [
+    {
+      "key": "sa",
+      "display_name": "SA",
+      "qlsa": false,
+      "proposal_cost_per_iteration": 1
+    },
+    {
+      "key": "current",
+      "display_name": "QLSA current",
+      "qlsa": true,
+      "qlsa_variant": "current",
+      "proposal_cost_per_iteration": 1
+    },
+    {
+      "key": "paper",
+      "display_name": "QLSA paper",
+      "qlsa": true,
+      "qlsa_variant": "paper",
+      "proposal_cost_per_iteration": 1
+    },
+    {
+      "key": "paper-sb",
+      "display_name": "QLSA paper-sb",
+      "qlsa": true,
+      "qlsa_variant": "paper-sb",
+      "proposal_cost_per_iteration": 1
+    }
+  ],
+  "paired_seeds": {
+    "start": 2601,
+    "count": 20,
+    "stride": 1
+  },
+  "execution": {
+    "parallel": "omp",
+    "chains": 64,
+    "threads": 8,
+    "init": "nn",
+    "t0": 1000.0,
+    "tf": 0.001,
+    "qlsa": {
+      "alpha": 0.1,
+      "gamma": 0.9,
+      "epsilon": 0.1,
+      "policy": "epsilon-greedy",
+      "diversity_threshold": 0.5
+    },
+    "require_backend_match": true,
+    "fixed_time_tolerance_ms": 1500,
+    "timeout_grace_seconds": 120
+  },
+  "budgets": {
+    "equal-iterations": {
+      "iterations_per_chain": 1000000
+    },
+    "fixed-time": {
+      "time_limit_ms": 30000,
+      "iterations_ceiling_per_chain": 1000000000,
+      "chains": 8,
+      "threads": 8
+    }
+  },
+  "executable_candidates": [
+    "build-cuda-ninja/tsp_sa.exe",
+    "build-cuda-ninja/tsp_sa",
+    "build/Release/tsp_sa.exe",
+    "build/tsp_sa"
+  ],
+  "output_root": "results/fair_experiments"
+}

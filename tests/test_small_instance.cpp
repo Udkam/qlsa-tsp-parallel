@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#error "Tests require assertions; NDEBUG must not be defined"
+#endif
 #include <cassert>
 #include <cmath>
 #include <iostream>

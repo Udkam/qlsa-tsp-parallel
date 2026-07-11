@@ -42,8 +42,36 @@ struct QLSAResult {
     double elapsed_ms = 0.0;
     int64_t accepted_moves = 0;
     int64_t improved_moves = 0;
+    int64_t iterations_completed = 0;
+    bool deadline_reached = false;
     std::vector<std::vector<double>> q_table;
     std::vector<int64_t> action_counts;
+};
+
+// Complete deterministic state for all current QLSA variants. Keeping the RNG,
+// temperature, Q table, diversity state, and delta window makes chunked runs
+// bit-for-bit equivalent to an uninterrupted run with the same parameters.
+struct QLSAState {
+    QLSAParams params;
+    std::vector<QLSAAction> actions;
+    Rng rng{1};
+    Tour current_tour;
+    Tour best_tour;
+    int current_length = 0;
+    int best_length = 0;
+    double temperature = 0.0;
+    double temperature_decay = 1.0;
+    std::vector<std::vector<double>> q_table;
+    std::vector<int64_t> action_counts;
+    std::vector<int> recent_deltas;
+    double recent_delta_sum = 0.0;
+    int learning_state = 0;
+    int64_t iterations_completed = 0;
+    int64_t accepted_moves = 0;
+    int64_t improved_moves = 0;
+    double elapsed_ms = 0.0;
+    bool deadline_reached = false;
+    bool initialized = false;
 };
 
 [[nodiscard]] std::vector<QLSAAction> default_qlsa_actions();
@@ -59,6 +87,15 @@ void update_q_value(std::vector<std::vector<double>>& q_table,
 [[nodiscard]] int select_qlsa_action(const std::vector<double>& q_values,
                                      const QLSAParams& params,
                                      Rng& rng);
+
+[[nodiscard]] QLSAState initialize_qlsa_state(const DistanceMatrix& dm,
+                                              const QLSAParams& params);
+SearchChunkProgress run_qlsa_chunk(const DistanceMatrix& dm,
+                                   QLSAState& state,
+                                   const SearchChunkOptions& options);
+[[nodiscard]] QLSAResult finalize_qlsa_state(const DistanceMatrix& dm,
+                                             const QLSAState& state);
+bool migrate_qlsa_tour(const DistanceMatrix& dm, QLSAState& state, const Tour& migrant);
 
 QLSAResult run_qlsa_2opt(const DistanceMatrix& dm, const QLSAParams& params);
 

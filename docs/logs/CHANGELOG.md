@@ -834,6 +834,96 @@ py -m py_compile scripts\check_report_assets.py scripts\check_report_format.py s
 
 结果均通过。
 
+## 2026-07-11 公平实验、限时搜索与 OpenMP island migration
+
+本轮工作在独立分支 `codex/fair-experiments-island-migration` 上完成，目标是补齐课程项目在“实验公平性、后端真实性、统计可信度和可协作多链搜索”上的工程缺口；未修改最终报告正文。
+
+### 核心实现
+
+- 将 SA 与 QLSA（`current`、`paper`、`paper-sb`）重构为 `initialize / run_chunk / finalize` 状态接口：
+  - 状态完整保存 RNG、温度、当前/最优路径、Q 表、动作计数和滚动窗口；
+  - 分块续跑与一次性运行保持确定性等价；
+  - 支持相对 time limit 和多 worker 共享的绝对 deadline；
+  - 结果记录实际完成迭代数与 deadline 状态。
+- 新增 OpenMP island 模型：
+  - 支持 `independent`、`ring`、`global` 三种拓扑；
+  - 迁移仅发生在同步 chunk 边界，避免 worker 读取正在变化的跨岛状态；
+  - 记录迁移轮次、尝试数、采纳数和真实 OpenMP team size。
+- 扩展 CLI：
+  - `--time-limit-ms`
+  - `--migration-topology disabled|independent|ring|global`
+  - `--migration-interval`
+- CSV 保留原 14 列前缀，并追加 total/kernel 计时、requested/actual backend、fallback 原因、实际迭代、deadline、迁移统计和 `actual_threads`。
+
+### 测量与后端真实性
+
+- `elapsed_ms` 与 `total_elapsed_ms` 统一为 end-to-end solver/backend 时间。
+- CUDA 另行记录 `cuda_kernel_elapsed_ms`；total 覆盖首次设备探测、分配、H2D、kernel、D2H、释放和结果校验。
+- CUDA/OpenMP fallback 不再伪装成请求后端，结构化记录 actual backend 与原因。
+- OpenMP 在真实 parallel region 内记录 `omp_get_num_threads()`，实验 runner 会拒绝实际线程数与请求不一致的样本。
+- Release 测试目标显式取消 `NDEBUG`，所有 assertion-based 测试增加编译期哨兵。
+
+### 公平实验流水线
+
+- 新增 `configs/fair_experiment_matrix.json`、`scripts/run_fair_experiments.py` 和 `scripts/analyze_paired_experiments.py`：
+  - 20 个 paired seeds；
+  - 等搜索迭代与固定 solver wall time 两种互补预算；
+  - 移除与等迭代命令完全重复、无法代表真实等工作的旧 `equal-proposals` 预算；
+  - seed 内使用可复现循环顺序平衡算法执行位置；
+  - 正式运行必须显式指定 executable；
+  - 严格核对算法/变体、预算、链数、初始化、requested/actual backend 和 actual threads；
+  - 记录环境、编译器、GPU、Git 状态和 config/input/executable/environment SHA-256；
+  - 目录分析前校验 manifest、raw、config snapshot、日志和 checksum sidecar。
+- 统计分析默认要求四算法完整共同 seed block，输出 bootstrap CI、配对 Wilcoxon、精确 sign test、Friedman 与 Holm 校正；不同 condition/provenance 不会混组。
+
+### Island 消融流水线
+
+- 新增 `configs/island_ablation_matrix.json`、`scripts/run_island_ablation.py` 和 `scripts/analyze_island_ablation.py`：
+  - 默认 3 个实例、SA 与 `paper-sb`、10 个 paired seeds；
+  - 10k/100k 两个 cadence；
+  - 每个 cadence 都运行匹配的 independent/ring/global，避免把 chunk/barrier 开销误算成迁移收益；
+  - 默认矩阵 360 jobs，每 island 1,000,000 iterations；
+  - 六个 algorithm-condition 位置按 seed 循环轮换；
+  - 默认要求每 interval 三拓扑的 seed 集完全一致；
+  - 输出迁移采纳率、paired differences、精确 sign test 和 condition 内 Holm 校正。
+
+### 验证结果
+
+- Release + MSVC + CUDA 12.9 + OpenMP：CTest **8/8**。
+- Release CPU-only（关闭 CUDA/OpenMP/MPI）：CTest **8/8**，覆盖真实 fallback。
+- Python 标准库流水线测试：**60/60**。
+- UTF-8、隐私与 mojibake 检查通过。
+- 30 秒 fixed-time 实测：
+  - solver total `30000.048 ms`；
+  - process wall `30012.714 ms`；
+  - `deadline_reached=true`；
+  - actual OpenMP threads `8/8`。
+- eil76 等迭代正式样本：4 algorithms × 20 seeds = **80/80 jobs**；完整 seed blocks=20，83 个 run artifact 通过 SHA-256 校验。
+  - SA 与 paper-sb 平均最优长度均为 `540.6`；
+  - BKS 命中率分别为 `10%` 与 `25%`；
+  - Friedman `p=0.1092`，Holm 校正后的 pairwise 比较均未达到 0.05，不能宣称显著普遍优势。
+- eil76 island 正式消融：2 algorithms × 10 seeds × 6 matched conditions = **120/120 jobs**。
+  - SA 在 10k cadence 下 ring/global 相对 independent 的平均最优长度差为 `-3.5/-4.0`；
+  - 两者原始 sign-test `p=0.0215`，Holm 后均为 `0.0859`，属于强趋势而非校正后显著结论；
+  - paper-sb 未显示稳定迁移收益。
+
+### 当前边界与后续实验
+
+- 尚未执行 5 实例 × 20 seeds 的完整公平矩阵；本轮正式结果只覆盖 eil76 等迭代口径。
+- fixed-time 已验证真实 30 秒样本和严格数据契约，但未跑完全部算法/实例/seed。
+- island 正式消融目前只完成 eil76；rat99、eil101 仍需按默认矩阵执行。
+- CUDA 暂不支持 mid-kernel time limit，island migration 当前为单机 OpenMP；MPI 跨节点迁移仍属于后续工作。
+- 课程报告正文按用户要求未在本分支更新。
+
+主要验证命令：
+
+```powershell
+ctest --test-dir tmp\build-measurement-release --output-on-failure -C Release
+ctest --test-dir tmp\build-measurement-cpu-release --output-on-failure -C Release
+python -S -m unittest tests.test_fair_experiment_pipeline tests.test_fair_runner_validation tests.test_fair_analyzer_integrity tests.test_island_ablation_pipeline tests.test_island_runner_hardening tests.test_island_analyzer_hardening
+python scripts\check_privacy_and_encoding.py
+```
+
 ## 2026-06-23 个人报告同步更新
 
 根据当前最终课程报告 `docs/final/report.md`，重写了 `docs/final/personal_report.md`。

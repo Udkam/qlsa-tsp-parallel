@@ -51,6 +51,7 @@ add_library(tsp_core
     src/timer.cpp
     src/sa.cpp
     src/qlsa.cpp
+    src/island.cpp
     src/parallel.cpp
     src/cuda.cpp
     src/metrics.cpp

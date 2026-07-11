@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "experiment_name": "paired_island_migration_ablation_v1",
+  "description": "Paired-seed ablation of independent, ring, and global-best island search. Every topology is evaluated at every chunk/migration interval so each migrating treatment has a cadence-matched independent runtime baseline.",
+  "instances": [
+    {
+      "name": "eil76",
+      "path": "data/eil76.tsp",
+      "dimension": 76,
+      "bks": 538
+    },
+    {
+      "name": "rat99",
+      "path": "data/rat99.tsp",
+      "dimension": 99,
+      "bks": 1211
+    },
+    {
+      "name": "eil101",
+      "path": "data/eil101.tsp",
+      "dimension": 101,
+      "bks": 629
+    }
+  ],
+  "algorithms": [
+    {
+      "key": "sa",
+      "display_name": "SA",
+      "qlsa": false
+    },
+    {
+      "key": "paper-sb",
+      "display_name": "QLSA paper-sb",
+      "qlsa": true,
+      "qlsa_variant": "paper-sb"
+    }
+  ],
+  "paired_seeds": {
+    "start": 3601,
+    "count": 10,
+    "stride": 1
+  },
+  "execution": {
+    "parallel": "omp",
+    "chains": 8,
+    "threads": 8,
+    "iterations_per_island": 1000000,
+    "init": "nn",
+    "t0": 1000.0,
+    "tf": 0.001,
+    "qlsa": {
+      "alpha": 0.1,
+      "gamma": 0.9,
+      "epsilon": 0.1,
+      "policy": "epsilon-greedy",
+      "diversity_threshold": 0.5
+    },
+    "require_backend_match": true,
+    "command_timeout_seconds": 900
+  },
+  "migration": {
+    "topologies": [
+      "independent",
+      "ring",
+      "global"
+    ],
+    "intervals": [
+      10000,
+      100000
+    ]
+  },
+  "executable_candidates": [
+    "tmp/build-fair-release/tsp_sa.exe",
+    "build-cuda-ninja/tsp_sa.exe",
+    "build/Release/tsp_sa.exe",
+    "build/tsp_sa"
+  ],
+  "output_root": "results/island_ablation"
+}

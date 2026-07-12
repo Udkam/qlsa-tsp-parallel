@@ -21,6 +21,8 @@
 - MPI + OpenMP 分布式多链搜索；
 - 严格后端/线程核验、paired-seed 公平实验、统计分析和报告检查脚本。
 
+输入域限定为**对称 TSP**：`TYPE: ATSP` 和非对称 `EXPLICIT/FULL_MATRIX` 会被明确拒绝，因为本项目的 2-opt O(1) 增量公式不适用于有向距离。多链的 `--init nn` 会按各链 seed 派生最近邻起点；单链仍保持 city 0 起点，便于复现传统串行行为。
+
 ## 构建与测试
 
 Windows + Ninja + CUDA：
@@ -32,6 +34,22 @@ ctest --test-dir build-cuda-ninja --output-on-failure
 ```
 
 如果本机没有 MPI，CMake 会禁用 MPI 目标；OpenMP/CUDA 主程序仍可构建。
+
+### CMake Presets（推荐）
+
+仓库提供 `CMakePresets.json`，将 CPU/OpenMP、CUDA/OpenMP、Ninja 和 Visual Studio 2022 的构建目录与必需后端条件固定下来。Ninja 在 Windows 上仍需在每次配置和编译时先加载 VS 开发环境：
+
+```powershell
+cmd /c "call ""C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"" -arch=x64 && cmake --preset ninja-cuda-release"
+cmd /c "call ""C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"" -arch=x64 && cmake --build --preset build-ninja-cuda-release --parallel"
+ctest --preset test-ninja-cuda-release --output-on-failure
+```
+
+没有 CUDA 时可改用 `ninja-cpu-release`、`build-ninja-cpu-release` 和 `test-ninja-cpu-release`。Visual Studio 2022 对应的配置入口为 `vs2022-cpu` / `vs2022-cuda`，Release 构建和测试入口分别为 `build-vs2022-*-release` / `test-vs2022-*-release`。
+
+CUDA preset 默认使用 CMake 3.24 的 `native` 架构探测，不再固定生成 `sm_70`。要生成可分发或 CI 使用的确定性 GPU 代码，请在配置时显式固定目标，例如追加 `-DTSP_CUDA_ARCHITECTURES=89`；多架构可使用 CMake 列表，如 `86;89`。CUDA/OpenMP preset 将相应后端设为必需，缺少工具链会在配置阶段明确失败。普通手工配置保留原有的可降级行为，可通过 `TSP_REQUIRE_CUDA=ON` 或 `TSP_REQUIRE_OPENMP=ON` 改为严格模式。
+
+变体实验脚本可自动识别这些 preset 生成的可执行文件；公平和 island 正式运行仍建议按其数据契约显式传入 `--executable`。
 
 ## 运行示例
 
@@ -51,7 +69,10 @@ QLSA + OpenMP：
 
 ```powershell
 .\build-cuda-ninja\tsp_sa.exe --qlsa --qlsa_variant paper-sb --input data\berlin52.tsp --iterations 100000 --seed 1 --init nn
+.\build-cuda-ninja\tsp_sa.exe --qlsa --qlsa_variant paper-sb --diversity_metric hamming --input data\berlin52.tsp --iterations 100000 --seed 1 --init nn
 ```
+
+`paper-sb` 默认采用 `edge`：无向回路边集差异对循环移位和反向表示不敏感。`hamming` 保留论文的 position-Hamming 定义，供论文/历史实验复现使用；两种 metric 的结果不能混合统计。
 
 CUDA 候选批量评价：
 
@@ -97,7 +118,7 @@ python scripts\analyze_paired_experiments.py --input results\fair_experiments\fa
 
 分析器默认只接受四算法完整的共同 seed block，并输出 bootstrap CI、配对 Wilcoxon、精确 sign test、Friedman 与 Holm 校正；只有探索性分析才使用 `--allow-incomplete-pairs`。
 
-岛模型消融默认比较 SA 与 `paper-sb` 在 `independent`、`ring`、`global` 下的结果，并统计迁移尝试、采纳率、质量差与运行时：
+岛模型消融默认比较 SA 与 `paper-sb` 在 `independent`、`ring`、`global` 下的结果，并统计迁移尝试、采纳率、质量差与运行时。历史公平与 island 配置显式固定 `hamming`，保证既有 CSV 的语义可复现：
 
 ```powershell
 python scripts\run_island_ablation.py --executable build-cuda-ninja\tsp_sa.exe --run-id island_ablation

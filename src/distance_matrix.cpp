@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cctype>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -70,6 +71,30 @@ void set_symmetric(std::vector<int>& data, int n, int i, int j, int value) {
     data[static_cast<size_t>(j) * n + i] = value;
 }
 
+void reject_unsupported_problem_type(const Instance& instance) {
+    if (uppercase(instance.type) == "ATSP") {
+        throw std::invalid_argument(
+            "unsupported TSPLIB TYPE ATSP: 2-opt delta evaluation requires a symmetric TSP distance matrix");
+    }
+}
+
+void reject_asymmetric_full_matrix(const std::vector<int>& data, int n) {
+    for (int i = 0; i < n; ++i) {
+        for (int j = i + 1; j < n; ++j) {
+            const int forward = data[static_cast<size_t>(i) * n + j];
+            const int reverse = data[static_cast<size_t>(j) * n + i];
+            if (forward != reverse) {
+                std::ostringstream message;
+                message << "unsupported asymmetric EXPLICIT FULL_MATRIX: 2-opt delta evaluation "
+                           "requires symmetric distances ("
+                        << (i + 1) << "->" << (j + 1) << "=" << forward << ", "
+                        << (j + 1) << "->" << (i + 1) << "=" << reverse << ")";
+                throw std::invalid_argument(message.str());
+            }
+        }
+    }
+}
+
 std::vector<int> build_explicit_matrix(const Instance& instance, const std::string& format) {
     const int n = instance.dimension;
     std::vector<int> data(static_cast<size_t>(n) * n, 0);
@@ -135,6 +160,7 @@ DistanceMatrix::DistanceMatrix(const Instance& instance) : n_(instance.dimension
     if (n_ <= 0) {
         throw std::invalid_argument("TSPLIB instance dimension must be positive");
     }
+    reject_unsupported_problem_type(instance);
 
     const std::string type = uppercase(instance.edge_weight_type);
     std::string format = uppercase(instance.edge_weight_format);
@@ -144,6 +170,9 @@ DistanceMatrix::DistanceMatrix(const Instance& instance) : n_(instance.dimension
             format = "FULL_MATRIX";
         }
         data_ = build_explicit_matrix(instance, format);
+        if (format == "FULL_MATRIX") {
+            reject_asymmetric_full_matrix(data_, n_);
+        }
     } else {
         if (static_cast<int>(instance.coords.size()) != n_) {
             throw std::runtime_error("coordinate instance requires exactly DIMENSION coordinates");

@@ -142,10 +142,18 @@ IslandResult run_openmp_islands(const DistanceMatrix& dm,
         if (params.algorithm == IslandAlgorithm::SA) {
             SAParams chain_params = params.sa_params;
             chain_params.seed = seed;
+            if (params.island_count > 1 && chain_params.use_nearest_neighbor_init) {
+                chain_params.nearest_neighbor_start =
+                    seeded_nearest_neighbor_start(seed, dm.size());
+            }
             states.emplace_back(initialize_sa_state(dm, chain_params));
         } else {
             QLSAParams chain_params = params.qlsa_params;
             chain_params.sa.seed = seed;
+            if (params.island_count > 1 && chain_params.sa.use_nearest_neighbor_init) {
+                chain_params.sa.nearest_neighbor_start =
+                    seeded_nearest_neighbor_start(seed, dm.size());
+            }
             states.emplace_back(initialize_qlsa_state(dm, chain_params));
         }
     }

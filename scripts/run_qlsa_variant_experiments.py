@@ -31,10 +31,41 @@ PROGRAM_HEADER = [
     "improved_moves",
 ]
 
+# The CLI has kept this 14-column prefix stable while extending its accounting
+# and migration fields.  This runner persists only the comparison prefix, but
+# must accept every supported CLI schema so current builds do not silently
+# produce an empty experiment CSV.
+PROGRAM_EXTENDED_HEADER = PROGRAM_HEADER + [
+    "total_elapsed_ms",
+    "cuda_kernel_elapsed_ms",
+    "requested_backend",
+    "actual_backend",
+    "backend_fallback",
+    "backend_fallback_reason",
+    "iterations_completed",
+    "deadline_reached",
+]
+
+PROGRAM_MIGRATION_HEADER = PROGRAM_EXTENDED_HEADER + [
+    "migration_topology",
+    "migration_interval",
+    "migration_rounds",
+    "migration_attempts",
+    "migrations_adopted",
+]
+
+PROGRAM_HEADERS_BY_WIDTH = {
+    len(PROGRAM_HEADER): PROGRAM_HEADER,
+    len(PROGRAM_EXTENDED_HEADER): PROGRAM_EXTENDED_HEADER,
+    len(PROGRAM_MIGRATION_HEADER): PROGRAM_MIGRATION_HEADER,
+    len(PROGRAM_MIGRATION_HEADER) + 1: PROGRAM_MIGRATION_HEADER + ["actual_threads"],
+}
+
 EXTRA_HEADER = [
     "qlsa_variant",
     "policy",
     "diversity_threshold",
+    "diversity_metric",
     "log_file",
 ]
 
@@ -45,6 +76,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--variants", nargs="+", choices=["current", "paper", "paper-sb"], default=["current", "paper", "paper-sb"])
     parser.add_argument("--policies", nargs="+", choices=["epsilon-greedy", "softmax"], default=["epsilon-greedy", "softmax"])
     parser.add_argument("--diversity-thresholds", nargs="+", type=float, default=[0.3, 0.5, 0.7])
+    parser.add_argument(
+        "--diversity-metric",
+        choices=["edge", "hamming"],
+        default="hamming",
+        help="paper-sb metric; hamming preserves the published comparison semantics",
+    )
     parser.add_argument("--iterations", type=int, default=300000)
     parser.add_argument("--repeat", type=int, default=3)
     parser.add_argument("--chains", type=int, default=32)
@@ -58,6 +95,12 @@ def parse_args() -> argparse.Namespace:
 
 def find_executable() -> Path:
     candidates = [
+        ROOT / "build" / "ninja-cuda-release" / "tsp_sa.exe",
+        ROOT / "build" / "ninja-cuda-release" / "tsp_sa",
+        ROOT / "build" / "ninja-cpu-release" / "tsp_sa.exe",
+        ROOT / "build" / "ninja-cpu-release" / "tsp_sa",
+        ROOT / "build" / "vs2022-cuda" / "Release" / "tsp_sa.exe",
+        ROOT / "build" / "vs2022-cpu" / "Release" / "tsp_sa.exe",
         ROOT / "build-cuda-ninja" / "tsp_sa.exe",
         ROOT / "build-cuda-ninja" / "tsp_sa",
         ROOT / "build" / "Release" / "tsp_sa.exe",
@@ -66,7 +109,10 @@ def find_executable() -> Path:
     for candidate in candidates:
         if candidate.exists():
             return candidate
-    raise FileNotFoundError("Could not find tsp_sa executable; build the project first")
+    raise FileNotFoundError(
+        "Could not find tsp_sa executable; build the project first "
+        "(for example: cmake --preset ninja-cuda-release)"
+    )
 
 
 def rows_from_stdout(stdout: str) -> list[dict[str, str]]:
@@ -79,8 +125,8 @@ def rows_from_stdout(stdout: str) -> list[dict[str, str]]:
             parts = next(csv.reader([line]))
         except csv.Error:
             continue
-        if len(parts) == len(PROGRAM_HEADER) and parts[0].startswith("qlsa"):
-            rows.append(dict(zip(PROGRAM_HEADER, parts)))
+        if parts[0].startswith("qlsa") and len(parts) in PROGRAM_HEADERS_BY_WIDTH:
+            rows.append(dict(zip(PROGRAM_HEADER, parts[: len(PROGRAM_HEADER)])))
     return rows
 
 
@@ -127,7 +173,14 @@ def run_one(
     threshold_value = ""
     if variant == "paper-sb" and threshold is not None:
         threshold_value = f"{threshold:.2f}"
-        command.extend(["--diversity_threshold", threshold_value])
+        command.extend(
+            [
+                "--diversity_threshold",
+                threshold_value,
+                "--diversity_metric",
+                args.diversity_metric,
+            ]
+        )
 
     timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     safe_threshold = threshold_value or "na"
@@ -155,6 +208,7 @@ def run_one(
         row["qlsa_variant"] = variant
         row["policy"] = policy
         row["diversity_threshold"] = threshold_value
+        row["diversity_metric"] = args.diversity_metric if variant == "paper-sb" else ""
         row["log_file"] = str(log_file.relative_to(ROOT))
     return rows
 

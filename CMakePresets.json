@@ -1,0 +1,125 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "cacheVariables": {
+        "TSP_ENABLE_MPI": "OFF"
+      }
+    },
+    {
+      "name": "ninja-base",
+      "hidden": true,
+      "inherits": "base",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "ninja-cpu-release",
+      "displayName": "Ninja CPU + OpenMP (Release)",
+      "description": "Release CPU build that requires the configured C++ compiler to provide OpenMP.",
+      "inherits": "ninja-base",
+      "cacheVariables": {
+        "TSP_ENABLE_CUDA": "OFF",
+        "TSP_REQUIRE_CUDA": "OFF",
+        "TSP_ENABLE_OPENMP": "ON",
+        "TSP_REQUIRE_OPENMP": "ON"
+      }
+    },
+    {
+      "name": "ninja-cuda-release",
+      "displayName": "Ninja CUDA + OpenMP (Release)",
+      "description": "Release CUDA build that requires CUDA and OpenMP; override TSP_CUDA_ARCHITECTURES to pin a distributable GPU target set.",
+      "inherits": "ninja-base",
+      "cacheVariables": {
+        "TSP_ENABLE_CUDA": "ON",
+        "TSP_REQUIRE_CUDA": "ON",
+        "TSP_CUDA_ARCHITECTURES": "native",
+        "TSP_ENABLE_OPENMP": "ON",
+        "TSP_REQUIRE_OPENMP": "ON"
+      }
+    },
+    {
+      "name": "vs2022-base",
+      "hidden": true,
+      "inherits": "base",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/${presetName}"
+    },
+    {
+      "name": "vs2022-cpu",
+      "displayName": "Visual Studio 2022 CPU + OpenMP (Release)",
+      "description": "Visual Studio CPU build that requires the configured C++ compiler to provide OpenMP.",
+      "inherits": "vs2022-base",
+      "cacheVariables": {
+        "TSP_ENABLE_CUDA": "OFF",
+        "TSP_REQUIRE_CUDA": "OFF",
+        "TSP_ENABLE_OPENMP": "ON",
+        "TSP_REQUIRE_OPENMP": "ON"
+      }
+    },
+    {
+      "name": "vs2022-cuda",
+      "displayName": "Visual Studio 2022 CUDA + OpenMP (Release)",
+      "description": "Visual Studio CUDA build that requires the installed CUDA VS toolset and OpenMP.",
+      "inherits": "vs2022-base",
+      "cacheVariables": {
+        "TSP_ENABLE_CUDA": "ON",
+        "TSP_REQUIRE_CUDA": "ON",
+        "TSP_CUDA_ARCHITECTURES": "native",
+        "TSP_ENABLE_OPENMP": "ON",
+        "TSP_REQUIRE_OPENMP": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "build-ninja-cpu-release",
+      "configurePreset": "ninja-cpu-release"
+    },
+    {
+      "name": "build-ninja-cuda-release",
+      "configurePreset": "ninja-cuda-release"
+    },
+    {
+      "name": "build-vs2022-cpu-release",
+      "configurePreset": "vs2022-cpu",
+      "configuration": "Release"
+    },
+    {
+      "name": "build-vs2022-cuda-release",
+      "configurePreset": "vs2022-cuda",
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "test-ninja-cpu-release",
+      "configurePreset": "ninja-cpu-release"
+    },
+    {
+      "name": "test-ninja-cuda-release",
+      "configurePreset": "ninja-cuda-release"
+    },
+    {
+      "name": "test-vs2022-cpu-release",
+      "configurePreset": "vs2022-cpu",
+      "configuration": "Release"
+    },
+    {
+      "name": "test-vs2022-cuda-release",
+      "configurePreset": "vs2022-cuda",
+      "configuration": "Release"
+    }
+  ]
+}

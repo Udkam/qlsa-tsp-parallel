@@ -71,6 +71,49 @@ void validate_basic_fields(const Instance& instance) {
     }
 }
 
+void reject_unsupported_problem_type(const Instance& instance) {
+    if (uppercase(instance.type) == "ATSP") {
+        throw std::runtime_error(
+            "unsupported TSPLIB TYPE ATSP: 2-opt delta evaluation requires a symmetric TSP distance matrix");
+    }
+}
+
+void reject_asymmetric_explicit_full_matrix(const Instance& instance) {
+    if (uppercase(instance.edge_weight_type) != "EXPLICIT") {
+        return;
+    }
+
+    const std::string format = instance.edge_weight_format.empty()
+                                   ? "FULL_MATRIX"
+                                   : uppercase(instance.edge_weight_format);
+    if (format != "FULL_MATRIX") {
+        return;
+    }
+
+    const size_t n = static_cast<size_t>(instance.dimension);
+    const size_t expected_weight_count = n * n;
+    // Keep malformed-section diagnostics in DistanceMatrix, which already owns
+    // the exact count validation for every EXPLICIT format.
+    if (instance.raw_weights.size() != expected_weight_count) {
+        return;
+    }
+
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = i + 1; j < n; ++j) {
+            const int forward = instance.raw_weights[i * n + j];
+            const int reverse = instance.raw_weights[j * n + i];
+            if (forward != reverse) {
+                std::ostringstream message;
+                message << "unsupported asymmetric EXPLICIT FULL_MATRIX: 2-opt delta evaluation "
+                           "requires symmetric distances ("
+                        << (i + 1) << "->" << (j + 1) << "=" << forward << ", "
+                        << (j + 1) << "->" << (i + 1) << "=" << reverse << ")";
+                throw std::runtime_error(message.str());
+            }
+        }
+    }
+}
+
 }  // namespace
 
 Instance load_tsplib(const std::string& path) {
@@ -158,6 +201,8 @@ Instance load_tsplib(const std::string& path) {
     }
 
     validate_basic_fields(instance);
+    reject_unsupported_problem_type(instance);
+    reject_asymmetric_explicit_full_matrix(instance);
     if (instance.name.empty()) {
         instance.name = path;
     }

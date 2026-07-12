@@ -213,11 +213,11 @@ __device__ void init_random_tour(int* tour, int n, uint64_t& rng_state) {
     }
 }
 
-__device__ void init_nearest_neighbor(int* tour, int* used, const int* dm, int n) {
+__device__ void init_nearest_neighbor(int* tour, int* used, const int* dm, int n, int start) {
     for (int i = 0; i < n; ++i) {
         used[i] = 0;
     }
-    int current = 0;
+    int current = start;
     tour[0] = current;
     used[current] = 1;
     for (int step = 1; step < n; ++step) {
@@ -397,7 +397,10 @@ __global__ void sa_kernel(const int* dm,
         const uint64_t chain_seed_value = rng_state;
 
         if (use_nearest_neighbor_init != 0) {
-            init_nearest_neighbor(current, used, dm, n);
+            const int start = chains > 1
+                                  ? static_cast<int>(chain_seed_value % static_cast<uint64_t>(n))
+                                  : 0;
+            init_nearest_neighbor(current, used, dm, n, start);
         } else {
             init_random_tour(current, n, rng_state);
         }
@@ -489,7 +492,10 @@ __global__ void sa_candidate_kernel(const int* dm,
         shared_seed_value = rng_state;
 
         if (use_nearest_neighbor_init != 0) {
-            init_nearest_neighbor(current, used, dm, n);
+            const int start = chains > 1
+                                  ? static_cast<int>(shared_seed_value % static_cast<uint64_t>(n))
+                                  : 0;
+            init_nearest_neighbor(current, used, dm, n, start);
         } else {
             init_random_tour(current, n, rng_state);
         }
@@ -666,7 +672,10 @@ __global__ void qlsa_kernel(const int* dm,
         }
 
         if (use_nearest_neighbor_init != 0) {
-            init_nearest_neighbor(current, used, dm, n);
+            const int start = chains > 1
+                                  ? static_cast<int>(chain_seed_value % static_cast<uint64_t>(n))
+                                  : 0;
+            init_nearest_neighbor(current, used, dm, n, start);
         } else {
             init_random_tour(current, n, rng_state);
         }
@@ -800,7 +809,10 @@ __global__ void qlsa_candidate_kernel(const int* dm,
         }
 
         if (use_nearest_neighbor_init != 0) {
-            init_nearest_neighbor(current, used, dm, n);
+            const int start = chains > 1
+                                  ? static_cast<int>(shared_seed_value % static_cast<uint64_t>(n))
+                                  : 0;
+            init_nearest_neighbor(current, used, dm, n, start);
         } else {
             init_random_tour(current, n, rng_state);
         }
@@ -998,6 +1010,9 @@ void validate_cuda_params(const DistanceMatrix& dm, const ParallelParams& params
     }
     if (params.cuda_candidates_per_iter > params.cuda_block_size) {
         throw std::invalid_argument("cuda_candidates_per_iter must be <= cuda_block_size");
+    }
+    if (params.algorithm == AlgorithmKind::QLSA && params.qlsa_params.variant != "current") {
+        throw std::invalid_argument("CUDA QLSA currently supports variant current only");
     }
     const long long iterations = (params.algorithm == AlgorithmKind::SA)
                                      ? params.sa_params.iterations

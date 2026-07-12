@@ -1,6 +1,7 @@
 #include "tsp/cuda.hpp"
 
 #include <iostream>
+#include <stdexcept>
 
 #include "tsp/timer.hpp"
 
@@ -20,6 +21,12 @@ bool cuda_available() noexcept {
 }
 
 ParallelResult run_cuda_chains(const DistanceMatrix& dm, const ParallelParams& params) {
+    // Keep public API behavior independent of whether this process happens to
+    // have a CUDA build/device. CPU fallback must not silently execute a
+    // different QLSA variant than an available GPU would execute.
+    if (params.algorithm == AlgorithmKind::QLSA && params.qlsa_params.variant != "current") {
+        throw std::invalid_argument("CUDA QLSA currently supports variant current only");
+    }
     Timer total_timer;
 #ifdef TSP_HAS_CUDA
     if (!cuda_available_impl()) {

@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstdint>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 
 #include "tsp/cuda.hpp"
@@ -63,6 +64,17 @@ void assert_valid(const tsp::DistanceMatrix& dm, const tsp::ParallelResult& resu
 int main() {
     const tsp::DistanceMatrix dm = load_fixture_dm();
     const bool cuda_is_available = tsp::cuda_available();
+
+    tsp::ParallelParams unsupported_variant = make_cuda_params(tsp::AlgorithmKind::QLSA, 19);
+    unsupported_variant.qlsa_params.variant = "paper-sb";
+    bool rejected_unsupported_variant = false;
+    try {
+        (void)tsp::run_parallel_chains(dm, unsupported_variant);
+    } catch (const std::invalid_argument& error) {
+        rejected_unsupported_variant =
+            std::string(error.what()).find("variant current only") != std::string::npos;
+    }
+    assert(rejected_unsupported_variant);
 
     const tsp::ParallelParams sa_params = make_cuda_params(tsp::AlgorithmKind::SA, 7);
     const tsp::ParallelResult sa_result = tsp::run_parallel_chains(dm, sa_params);

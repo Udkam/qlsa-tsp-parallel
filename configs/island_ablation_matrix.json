@@ -53,7 +53,8 @@
       "gamma": 0.9,
       "epsilon": 0.1,
       "policy": "epsilon-greedy",
-      "diversity_threshold": 0.5
+      "diversity_threshold": 0.5,
+      "diversity_metric": "hamming"
     },
     "require_backend_match": true,
     "command_timeout_seconds": 900
@@ -71,6 +72,12 @@
   },
   "executable_candidates": [
     "tmp/build-fair-release/tsp_sa.exe",
+    "build/ninja-cuda-release/tsp_sa.exe",
+    "build/ninja-cuda-release/tsp_sa",
+    "build/ninja-cpu-release/tsp_sa.exe",
+    "build/ninja-cpu-release/tsp_sa",
+    "build/vs2022-cuda/Release/tsp_sa.exe",
+    "build/vs2022-cpu/Release/tsp_sa.exe",
     "build-cuda-ninja/tsp_sa.exe",
     "build/Release/tsp_sa.exe",
     "build/tsp_sa"

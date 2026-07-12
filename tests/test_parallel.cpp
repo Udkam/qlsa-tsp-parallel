@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <iostream>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <string>
 
@@ -63,10 +64,67 @@ void assert_parallel_result_valid(const tsp::DistanceMatrix& dm,
     }
 }
 
+uint64_t base_seed_with_distinct_nn_starts(const tsp::DistanceMatrix& dm, int chains) {
+    for (uint64_t base_seed = 0; base_seed < 100000; ++base_seed) {
+        std::set<int> starts;
+        for (int chain_id = 0; chain_id < chains; ++chain_id) {
+            starts.insert(tsp::seeded_nearest_neighbor_start(
+                tsp::chain_seed(base_seed, chain_id), dm.size()));
+        }
+        if (static_cast<int>(starts.size()) == chains) {
+            return base_seed;
+        }
+    }
+    assert(false && "expected a base seed with distinct seeded NN starts");
+    return 0;
+}
+
+void test_seeded_nearest_neighbor_initialization(const tsp::DistanceMatrix& dm) {
+    constexpr int kChains = 4;
+    const uint64_t base_seed = base_seed_with_distinct_nn_starts(dm, kChains);
+
+    tsp::ParallelParams params = make_params(tsp::AlgorithmKind::SA, kChains, 1, base_seed);
+    params.sa_params.iterations = 1;
+    params.sa_params.initial_temperature = 1e-12;
+    params.sa_params.final_temperature = 1e-12;
+    params.sa_params.use_nearest_neighbor_init = true;
+    params.qlsa_params.sa = params.sa_params;
+
+    const tsp::ParallelResult first = tsp::run_parallel_chains(dm, params);
+    const tsp::ParallelResult repeat = tsp::run_parallel_chains(dm, params);
+    std::set<int> starts;
+    for (int chain_id = 0; chain_id < kChains; ++chain_id) {
+        const tsp::ChainResult& chain = first.chain_results[static_cast<size_t>(chain_id)];
+        const int expected_start = tsp::seeded_nearest_neighbor_start(chain.seed, dm.size());
+        assert(chain.best_tour.front() == expected_start);
+        assert(chain.best_tour == repeat.chain_results[static_cast<size_t>(chain_id)].best_tour);
+        starts.insert(expected_start);
+    }
+    assert(static_cast<int>(starts.size()) == kChains);
+
+    tsp::ParallelParams qlsa_params = params;
+    qlsa_params.algorithm = tsp::AlgorithmKind::QLSA;
+    qlsa_params.qlsa_params.sa = qlsa_params.sa_params;
+    const tsp::ParallelResult qlsa = tsp::run_parallel_chains(dm, qlsa_params);
+    for (int chain_id = 0; chain_id < kChains; ++chain_id) {
+        const tsp::ChainResult& chain = qlsa.chain_results[static_cast<size_t>(chain_id)];
+        assert(chain.best_tour.front() ==
+               tsp::seeded_nearest_neighbor_start(chain.seed, dm.size()));
+    }
+
+    tsp::ParallelParams single = params;
+    single.chains = 1;
+    single.base_seed = base_seed;
+    const tsp::ParallelResult standalone = tsp::run_parallel_chains(dm, single);
+    assert(standalone.chain_results.front().best_tour.front() == 0);
+}
+
 }  // namespace
 
 int main() {
     const tsp::DistanceMatrix dm = load_fixture_dm();
+
+    test_seeded_nearest_neighbor_initialization(dm);
 
     assert(std::string(tsp::parallel_backend_name(tsp::ParallelBackend::CpuSerial)) ==
            "cpu_serial");

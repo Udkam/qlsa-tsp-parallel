@@ -20,10 +20,15 @@ void apply_2opt(Tour& tour, int i, int k);
 
 // Building blocks toward a paper-style (candidate-leader) QLSA variant.
 // double_bridge applies a 4-opt double-bridge perturbation and returns a new
-// legal permutation; hamming_distance gives the position-wise difference count
-// used by the paper's diversity-state definition. See
-// docs/dev/paper_lite_qlsa_design.md.
+// legal permutation. hamming_distance preserves the position-wise metric used
+// by the paper; undirected_edge_distance is an engineering metric for
+// symmetric TSP that is invariant under cyclic rotation and reversal.
+// See docs/dev/paper_lite_qlsa_design.md.
 [[nodiscard]] Tour double_bridge(const Tour& tour, Rng& rng);
 [[nodiscard]] int hamming_distance(const Tour& a, const Tour& b);
+// Counts edges in a that are absent from b, treating every edge as undirected.
+// For legal tours over the same cities this is in [0, n] and is zero exactly
+// when both tours represent the same undirected Hamiltonian cycle.
+[[nodiscard]] int undirected_edge_distance(const Tour& a, const Tour& b);
 
 }  // namespace tsp

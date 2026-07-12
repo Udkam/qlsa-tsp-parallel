@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstdint>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 
 #include "tsp/cuda.hpp"
@@ -70,6 +71,17 @@ int main() {
     }
 
     const tsp::DistanceMatrix dm = load_fixture_dm();
+
+    tsp::ParallelParams unsupported_variant = make_params(97, tsp::CudaReversalMode::Serial);
+    unsupported_variant.qlsa_params.variant = "paper-sb";
+    bool rejected_unsupported_variant = false;
+    try {
+        (void)tsp::run_parallel_chains(dm, unsupported_variant);
+    } catch (const std::invalid_argument& error) {
+        rejected_unsupported_variant =
+            std::string(error.what()).find("variant current only") != std::string::npos;
+    }
+    assert(rejected_unsupported_variant);
 
     const tsp::ParallelParams serial = make_params(101, tsp::CudaReversalMode::Serial);
     const tsp::ParallelResult serial_result = tsp::run_parallel_chains(dm, serial);

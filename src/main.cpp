@@ -48,6 +48,7 @@ struct CliOptions {
     std::string qlsa_policy = "epsilon-greedy";
     std::string qlsa_variant = "current";
     double qlsa_diversity_threshold = 0.5;
+    std::string qlsa_diversity_metric = "edge";
     std::optional<int64_t> time_limit_ms;
     std::string migration_topology = "disabled";
     int64_t migration_interval = 10000;
@@ -60,7 +61,7 @@ void print_usage(const char* program) {
         << "       " << program
         << " --qlsa --input data/berlin52.tsp --iterations 1000000 --seed 1 --alpha 0.1 --gamma 0.9 --epsilon 0.1 --policy epsilon-greedy\n"
         << "       " << program
-        << " --qlsa --qlsa_variant paper-sb --input data/berlin52.tsp --iterations 1000000 --seed 1\n"
+        << " --qlsa --qlsa_variant paper-sb --diversity_metric edge --input data/berlin52.tsp --iterations 1000000 --seed 1\n"
         << "       " << program
         << " --input data/berlin52.tsp --parallel omp --chains 8 --threads 4 --iterations 1000000 --seed 1\n"
         << "       " << program
@@ -131,6 +132,8 @@ CliOptions parse_args(int argc, char** argv) {
             options.qlsa_variant = require_value(arg);
         } else if (arg == "--diversity_threshold") {
             options.qlsa_diversity_threshold = std::stod(require_value(arg));
+        } else if (arg == "--diversity_metric") {
+            options.qlsa_diversity_metric = require_value(arg);
         } else if (arg == "--time-limit-ms") {
             options.time_limit_ms = std::stoll(require_value(arg));
         } else if (arg == "--migration-topology") {
@@ -203,6 +206,9 @@ CliOptions parse_args(int argc, char** argv) {
     }
     if (options.qlsa_diversity_threshold < 0.0 || options.qlsa_diversity_threshold > 1.0) {
         throw std::invalid_argument("--diversity_threshold must be in [0, 1]");
+    }
+    if (options.qlsa_diversity_metric != "edge" && options.qlsa_diversity_metric != "hamming") {
+        throw std::invalid_argument("--diversity_metric must be edge or hamming");
     }
     if (options.time_limit_ms.has_value() && *options.time_limit_ms <= 0) {
         throw std::invalid_argument("--time-limit-ms must be positive");
@@ -328,6 +334,7 @@ tsp::QLSAParams make_qlsa_params(const CliOptions& options, const tsp::SAParams&
     params.policy = options.qlsa_policy;
     params.variant = options.qlsa_variant;
     params.diversity_threshold = options.qlsa_diversity_threshold;
+    params.diversity_metric = options.qlsa_diversity_metric;
     return params;
 }
 
@@ -575,7 +582,8 @@ int main(int argc, char** argv) {
                           << " epsilon=" << options.qlsa_epsilon
                           << " policy=" << options.qlsa_policy
                           << " variant=" << options.qlsa_variant
-                          << " diversity_threshold=" << options.qlsa_diversity_threshold << '\n';
+                          << " diversity_threshold=" << options.qlsa_diversity_threshold
+                          << " diversity_metric=" << options.qlsa_diversity_metric << '\n';
             }
             std::cout
                 << "CSV: algorithm,instance,dimension,iterations,seed,init,chains,threads,parallel,"

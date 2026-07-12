@@ -1,0 +1,11 @@
+NAME: asymmetric_full_matrix3
+TYPE: TSP
+COMMENT: Must be rejected because its FULL_MATRIX is not symmetric.
+DIMENSION: 3
+EDGE_WEIGHT_TYPE: EXPLICIT
+EDGE_WEIGHT_FORMAT: FULL_MATRIX
+EDGE_WEIGHT_SECTION
+0 1 4
+2 0 3
+4 3 0
+EOF

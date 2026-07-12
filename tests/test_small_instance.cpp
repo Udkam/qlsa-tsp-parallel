@@ -3,6 +3,7 @@
 #endif
 #include <cassert>
 #include <cmath>
+#include <exception>
 #include <iostream>
 #include <numeric>
 #include <string>
@@ -30,6 +31,18 @@ tsp::Instance make_square_instance() {
         {0.0, 10.0},
     };
     return instance;
+}
+
+template <typename Function>
+void assert_throws_with_message(Function&& function, const std::string& expected_fragment) {
+    bool threw = false;
+    try {
+        function();
+    } catch (const std::exception& error) {
+        threw = true;
+        assert(std::string(error.what()).find(expected_fragment) != std::string::npos);
+    }
+    assert(threw);
 }
 
 }  // namespace
@@ -118,6 +131,45 @@ int main() {
     const tsp::QLSAResult parsed_result = tsp::run_qlsa_2opt(parsed_dm, qlsa_params);
     assert(tsp::is_valid_tour(parsed_result.best_tour, parsed_dm.size()));
     assert(parsed_result.best_length == 40);
+
+    const std::string atsp_path = std::string(TEST_SOURCE_DIR) + "/fixtures/atsp3.tsp";
+    assert_throws_with_message(
+        [&] { (void)tsp::load_tsplib(atsp_path); },
+        "TYPE ATSP");
+
+    const std::string asymmetric_path =
+        std::string(TEST_SOURCE_DIR) + "/fixtures/asymmetric_full_matrix3.tsp";
+    assert_throws_with_message(
+        [&] { (void)tsp::load_tsplib(asymmetric_path); },
+        "asymmetric EXPLICIT FULL_MATRIX");
+
+    tsp::Instance direct_atsp = make_square_instance();
+    direct_atsp.type = "atsp";
+    assert_throws_with_message(
+        [&] { (void)tsp::DistanceMatrix(direct_atsp); },
+        "TYPE ATSP");
+
+    tsp::Instance symmetric_explicit;
+    symmetric_explicit.name = "symmetric_explicit3";
+    symmetric_explicit.type = "TSP";
+    symmetric_explicit.dimension = 3;
+    symmetric_explicit.edge_weight_type = "EXPLICIT";
+    symmetric_explicit.edge_weight_format = "FULL_MATRIX";
+    symmetric_explicit.raw_weights = {
+        0, 7, 11,
+        7, 0, 5,
+        11, 5, 0,
+    };
+    const tsp::DistanceMatrix symmetric_explicit_dm(symmetric_explicit);
+    assert(symmetric_explicit_dm.dist(0, 1) == 7);
+    assert(symmetric_explicit_dm.dist(1, 0) == 7);
+
+    tsp::Instance asymmetric_explicit = symmetric_explicit;
+    asymmetric_explicit.name = "asymmetric_explicit3";
+    asymmetric_explicit.raw_weights[1] = 9;
+    assert_throws_with_message(
+        [&] { (void)tsp::DistanceMatrix(asymmetric_explicit); },
+        "asymmetric EXPLICIT FULL_MATRIX");
 
     std::cout << "test_small_instance passed\n";
     return 0;

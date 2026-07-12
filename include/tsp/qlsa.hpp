@@ -32,6 +32,10 @@ struct QLSAParams {
     int state_window = 8;
     double delta_scale = 10.0;
     double diversity_threshold = 0.5;
+    // edge is the default engineering metric for symmetric TSP. hamming keeps
+    // the paper's position-wise State-Based QLSA definition available for
+    // faithful reproduction of historical experiments.
+    std::string diversity_metric = "edge";
     std::vector<QLSAAction> actions;
 };
 
@@ -65,6 +69,10 @@ struct QLSAState {
     std::vector<int64_t> action_counts;
     std::vector<int> recent_deltas;
     double recent_delta_sum = 0.0;
+    // For paper-sb + edge, stores the two incident best-tour cities for each
+    // city index. It is allocated once per search state so diversity updates do
+    // not allocate a hash table on every iteration.
+    std::vector<int> edge_diversity_best_neighbors;
     int learning_state = 0;
     int64_t iterations_completed = 0;
     int64_t accepted_moves = 0;
@@ -77,6 +85,12 @@ struct QLSAState {
 [[nodiscard]] std::vector<QLSAAction> default_qlsa_actions();
 [[nodiscard]] int qlsa_state_from_average_delta(double average_delta, double delta_scale);
 [[nodiscard]] double qlsa_reward_from_delta(int delta, bool accepted);
+// Returns a normalized diversity ratio in [0, 1]. Supported metrics are
+// "edge" (undirected cycle-edge difference) and "hamming" (paper-compatible
+// position-wise difference).
+[[nodiscard]] double qlsa_diversity_ratio(const Tour& current,
+                                          const Tour& best,
+                                          const std::string& metric);
 void update_q_value(std::vector<std::vector<double>>& q_table,
                     int state,
                     int action,

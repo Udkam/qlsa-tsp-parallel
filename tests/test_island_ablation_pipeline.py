@@ -113,6 +113,11 @@ class MatrixTests(unittest.TestCase):
             all(job.migration_interval == job.command_migration_interval for job in independent)
         )
         self.assertTrue(all("--migration-topology" in job.command for job in jobs))
+        paper_sb_commands = [job.command for job in jobs if job.algorithm["key"] == "paper-sb"]
+        self.assertTrue(paper_sb_commands)
+        for command in paper_sb_commands:
+            metric_index = command.index("--diversity_metric")
+            self.assertEqual(command[metric_index + 1], "hamming")
 
     def test_subset_and_dry_run_need_no_project_executable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

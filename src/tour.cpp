@@ -1,10 +1,12 @@
 #include "tsp/tour.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <limits>
 #include <numeric>
 #include <random>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace tsp {
 
@@ -158,6 +160,35 @@ int hamming_distance(const Tour& a, const Tour& b) {
         }
     }
     return count;
+}
+
+int undirected_edge_distance(const Tour& a, const Tour& b) {
+    if (a.size() != b.size()) {
+        throw std::invalid_argument("undirected_edge_distance requires equal-length tours");
+    }
+    if (a.empty()) {
+        return 0;
+    }
+
+    const auto edge_key = [](int lhs, int rhs) -> uint64_t {
+        const uint32_t low = static_cast<uint32_t>(std::min(lhs, rhs));
+        const uint32_t high = static_cast<uint32_t>(std::max(lhs, rhs));
+        return (static_cast<uint64_t>(low) << 32U) | high;
+    };
+
+    std::unordered_set<uint64_t> b_edges;
+    b_edges.reserve(b.size() * 2U);
+    for (size_t i = 0; i < b.size(); ++i) {
+        b_edges.insert(edge_key(b[i], b[(i + 1U) % b.size()]));
+    }
+
+    int differing_edges = 0;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (b_edges.find(edge_key(a[i], a[(i + 1U) % a.size()])) == b_edges.end()) {
+            ++differing_edges;
+        }
+    }
+    return differing_edges;
 }
 
 }  // namespace tsp

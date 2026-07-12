@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.24)
 
 project(tsp_qlearning_sa LANGUAGES CXX)
 include(CheckLanguage)
@@ -8,39 +8,85 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(TSP_ENABLE_OPENMP "Enable OpenMP parallel algorithms" ON)
+option(TSP_REQUIRE_OPENMP "Fail configuration when requested OpenMP support is unavailable" OFF)
 option(TSP_ENABLE_CUDA "Enable CUDA parallel algorithms" ON)
+option(TSP_REQUIRE_CUDA "Fail configuration when requested CUDA support is unavailable" OFF)
 # MPI + OpenMP hybrid backend is an optional engineering extension. It is ON by
 # default, but gracefully disabled when MPI is not installed, so it never affects
 # the default OpenMP/CUDA build.
 option(TSP_ENABLE_MPI "Enable MPI backend" ON)
 
+# CMake 3.24 introduced the `native` CUDA architecture value. It avoids baking
+# the former fixed sm_70 target into every local build. For a distributable or
+# CI artifact, pin this to the intended device set (for example `86;89`).
+set(TSP_CUDA_ARCHITECTURES "native" CACHE STRING
+    "CUDA architectures: native, all-major, all, or a semicolon-separated list such as 86;89")
+set_property(CACHE TSP_CUDA_ARCHITECTURES PROPERTY STRINGS native all-major all)
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
+if(TSP_REQUIRE_OPENMP AND NOT TSP_ENABLE_OPENMP)
+    message(FATAL_ERROR "TSP_REQUIRE_OPENMP=ON requires TSP_ENABLE_OPENMP=ON.")
+endif()
+
 if(TSP_ENABLE_OPENMP)
-    find_package(OpenMP QUIET)
+    find_package(OpenMP QUIET COMPONENTS CXX)
+    if(OpenMP_CXX_FOUND)
+        message(STATUS "OpenMP enabled")
+    elseif(TSP_REQUIRE_OPENMP)
+        message(FATAL_ERROR
+            "TSP_REQUIRE_OPENMP=ON, but no usable C++ OpenMP runtime was found. "
+            "Install/configure the compiler OpenMP support, or configure with -DTSP_REQUIRE_OPENMP=OFF.")
+    else()
+        message(WARNING
+            "OpenMP was requested but is unavailable; parallel mode will fall back to serial multi-chain execution. "
+            "Set -DTSP_REQUIRE_OPENMP=ON to make this a configuration error.")
+    endif()
+else()
+    message(STATUS "OpenMP disabled (TSP_ENABLE_OPENMP=OFF)")
 endif()
 
 set(TSP_CUDA_SOURCES "")
+set(TSP_CUDA_ENABLED OFF)
+if(TSP_REQUIRE_CUDA AND NOT TSP_ENABLE_CUDA)
+    message(FATAL_ERROR "TSP_REQUIRE_CUDA=ON requires TSP_ENABLE_CUDA=ON.")
+endif()
+
 if(TSP_ENABLE_CUDA)
-    if(CMAKE_GENERATOR MATCHES "Visual Studio")
-        unset(CMAKE_CUDA_COMPILER CACHE)
-        message(STATUS "CUDA language skipped for Visual Studio generator unless CUDA VS toolset is installed; cuda mode will fall back to serial multi-chain execution")
-    else()
-        check_language(CUDA)
-    endif()
-    if(CMAKE_CUDA_COMPILER AND NOT CMAKE_GENERATOR MATCHES "Visual Studio")
+    # Let check_language probe both Ninja and Visual Studio generators. A VS
+    # CUDA preset therefore uses the installed CUDA VS toolset when available
+    # instead of silently forcing a CPU fallback.
+    check_language(CUDA)
+    if(CMAKE_CUDA_COMPILER AND NOT CMAKE_CUDA_COMPILER MATCHES "-NOTFOUND$")
         enable_language(CUDA)
         set(CMAKE_CUDA_STANDARD 17)
         set(CMAKE_CUDA_STANDARD_REQUIRED ON)
         set(CMAKE_CUDA_EXTENSIONS OFF)
-        set(CMAKE_CUDA_ARCHITECTURES 70 CACHE STRING "CUDA architectures")
+
+        if(TSP_CUDA_ARCHITECTURES STREQUAL "" OR TSP_CUDA_ARCHITECTURES STREQUAL "OFF")
+            message(FATAL_ERROR
+                "TSP_CUDA_ARCHITECTURES must name at least one CUDA architecture when CUDA is enabled. "
+                "Use native, all-major, all, or a list such as 86;89.")
+        endif()
+        # FORCE also replaces the stale sm_70 value in existing build caches.
+        set(CMAKE_CUDA_ARCHITECTURES "${TSP_CUDA_ARCHITECTURES}" CACHE STRING
+            "CUDA architectures selected by TSP_CUDA_ARCHITECTURES" FORCE)
         set(TSP_CUDA_SOURCES src/cuda_kernels.cu)
-        message(STATUS "CUDA enabled")
-    elseif(NOT CMAKE_GENERATOR MATCHES "Visual Studio")
-        message(STATUS "CUDA compiler not found; cuda mode will fall back to serial multi-chain execution")
+        set(TSP_CUDA_ENABLED ON)
+        message(STATUS "CUDA enabled (${CMAKE_CUDA_COMPILER}; architectures: ${CMAKE_CUDA_ARCHITECTURES})")
+    elseif(TSP_REQUIRE_CUDA)
+        message(FATAL_ERROR
+            "TSP_REQUIRE_CUDA=ON, but CMake could not enable a CUDA compiler for the ${CMAKE_GENERATOR} generator. "
+            "Install the CUDA toolkit/toolset or configure with -DTSP_REQUIRE_CUDA=OFF.")
+    else()
+        message(WARNING
+            "CUDA was requested but no CUDA compiler is available; CUDA mode will fall back to serial multi-chain execution. "
+            "Set -DTSP_REQUIRE_CUDA=ON to make this a configuration error.")
     endif()
+else()
+    message(STATUS "CUDA disabled (TSP_ENABLE_CUDA=OFF)")
 endif()
 
 add_library(tsp_core
@@ -63,12 +109,9 @@ target_include_directories(tsp_core PUBLIC include)
 if(TSP_ENABLE_OPENMP AND OpenMP_CXX_FOUND)
     target_link_libraries(tsp_core PUBLIC OpenMP::OpenMP_CXX)
     target_compile_definitions(tsp_core PUBLIC TSP_HAS_OPENMP=1)
-    message(STATUS "OpenMP enabled")
-else()
-    message(STATUS "OpenMP not enabled or not found; parallel mode will fall back to serial multi-chain execution")
 endif()
 
-if(TSP_ENABLE_CUDA AND CMAKE_CUDA_COMPILER)
+if(TSP_CUDA_ENABLED)
     target_compile_definitions(tsp_core PUBLIC TSP_HAS_CUDA=1)
     set_source_files_properties(src/cuda_kernels.cu PROPERTIES LANGUAGE CUDA)
     target_compile_options(tsp_core PRIVATE

@@ -227,6 +227,30 @@ class RunnerTests(unittest.TestCase):
             self.assertIn("--chains 64 --threads 8", equal_line)
             self.assertFalse(output_root.exists())
 
+    def test_default_paper_sb_command_pins_hamming_metric(self) -> None:
+        config = json.loads(
+            (ROOT / "configs/fair_experiment_matrix.json").read_text(encoding="utf-8")
+        )
+        config["instances"] = [
+            {"name": "square4", "path": "tests/fixtures/square4.tsp", "bks": 4}
+        ]
+        config["paired_seeds"] = {"start": 17, "count": 1, "stride": 1}
+        args = runner.parse_args(
+            [
+                "--executable",
+                sys.executable,
+                "--budget",
+                "equal-iterations",
+                "--algorithms",
+                "paper-sb",
+            ]
+        )
+        jobs = runner.build_jobs(config, args, Path(sys.executable))
+        self.assertEqual(len(jobs), 1)
+        command = jobs[0].command
+        metric_index = command.index("--diversity_metric")
+        self.assertEqual(command[metric_index + 1], "hamming")
+
 
 class AnalyzerIntegrityTests(unittest.TestCase):
     @staticmethod

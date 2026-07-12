@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cstdint>
@@ -30,6 +31,36 @@ tsp::DistanceMatrix make_irregular_dm() {
                                    static_cast<double>((i * 61 + i * i * 5) % 191)});
     }
     return tsp::DistanceMatrix(instance);
+}
+
+struct MigrationTours {
+    tsp::Tour best;
+    tsp::Tour worse;
+};
+
+MigrationTours make_migration_tours(const tsp::DistanceMatrix& dm) {
+    const tsp::Tour best = tsp::nearest_neighbor_tour(dm);
+    const int best_length = tsp::tour_length(best, dm);
+    tsp::Rng rng(713);
+    for (int attempt = 0; attempt < 1024; ++attempt) {
+        tsp::Tour candidate = tsp::random_tour(dm.size(), rng);
+        if (tsp::tour_length(candidate, dm) > best_length) {
+            return {best, candidate};
+        }
+    }
+    assert(false && "fixture must provide a random tour worse than nearest-neighbor");
+    return {};
+}
+
+void set_qlsa_state_tours(tsp::QLSAState& state,
+                          const tsp::DistanceMatrix& dm,
+                          const tsp::Tour& current,
+                          const tsp::Tour& best) {
+    state.current_tour = current;
+    state.current_length = tsp::tour_length(current, dm);
+    state.best_tour = best;
+    state.best_length = tsp::tour_length(best, dm);
+    assert(state.best_length < state.current_length);
 }
 
 void assert_sa_equal(const tsp::SAResult& lhs, const tsp::SAResult& rhs) {
@@ -116,6 +147,55 @@ void test_qlsa_chunk_equivalence(const tsp::DistanceMatrix& dm, const std::strin
         assert(progress.iterations_completed > 0);
     }
     assert_qlsa_equal(uninterrupted, tsp::finalize_qlsa_state(dm, state));
+}
+
+void test_qlsa_migration_learning_state(const tsp::DistanceMatrix& dm) {
+    const MigrationTours tours = make_migration_tours(dm);
+
+    tsp::QLSAParams current_params;
+    current_params.sa.iterations = 20;
+    // Keep the initialized best tour aligned with make_migration_tours() so
+    // the paper-sb edge cache represents the same global-best cycle.
+    current_params.sa.use_nearest_neighbor_init = true;
+    current_params.variant = "current";
+    tsp::QLSAState current = tsp::initialize_qlsa_state(dm, current_params);
+    set_qlsa_state_tours(current, dm, tours.worse, tours.best);
+    current.recent_deltas = {9, -3};
+    current.recent_delta_sum = 6.0;
+    current.learning_state = 0;
+    assert(tsp::migrate_qlsa_tour(dm, current, tours.best));
+    assert(current.recent_deltas.empty());
+    assert(current.recent_delta_sum == 0.0);
+    assert(current.learning_state ==
+           tsp::qlsa_state_from_average_delta(0.0, current.params.delta_scale));
+
+    tsp::QLSAParams paper_params = current_params;
+    paper_params.variant = "paper";
+    tsp::QLSAState paper = tsp::initialize_qlsa_state(dm, paper_params);
+    set_qlsa_state_tours(paper, dm, tours.worse, tours.best);
+    paper.learning_state = 1;
+    assert(tsp::migrate_qlsa_tour(dm, paper, tours.best));
+    assert(paper.learning_state == 0);
+
+    tsp::Tour rotated_best = tours.best;
+    std::rotate(rotated_best.begin(), rotated_best.begin() + 1, rotated_best.end());
+    assert(tsp::tour_length(rotated_best, dm) == tsp::tour_length(tours.best, dm));
+
+    tsp::QLSAParams edge_params = current_params;
+    edge_params.variant = "paper-sb";
+    edge_params.diversity_threshold = 0.5;
+    edge_params.diversity_metric = "edge";
+    tsp::QLSAState edge = tsp::initialize_qlsa_state(dm, edge_params);
+    set_qlsa_state_tours(edge, dm, tours.worse, tours.best);
+    assert(tsp::migrate_qlsa_tour(dm, edge, rotated_best));
+    assert(edge.learning_state == 0);
+
+    tsp::QLSAParams hamming_params = edge_params;
+    hamming_params.diversity_metric = "hamming";
+    tsp::QLSAState hamming = tsp::initialize_qlsa_state(dm, hamming_params);
+    set_qlsa_state_tours(hamming, dm, tours.worse, tours.best);
+    assert(tsp::migrate_qlsa_tour(dm, hamming, rotated_best));
+    assert(hamming.learning_state == 1);
 }
 
 void assert_island_result_valid(const tsp::DistanceMatrix& dm,
@@ -236,6 +316,7 @@ int main() {
     test_qlsa_chunk_equivalence(dm, "current");
     test_qlsa_chunk_equivalence(dm, "paper");
     test_qlsa_chunk_equivalence(dm, "paper-sb");
+    test_qlsa_migration_learning_state(dm);
     test_island_topologies(dm);
     test_shared_time_boundary(dm);
     std::cout << "test_island passed\n";

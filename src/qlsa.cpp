@@ -46,6 +46,9 @@ void validate_params(const QLSAParams& params) {
     if (params.diversity_threshold < 0.0 || params.diversity_threshold > 1.0) {
         throw std::invalid_argument("QLSA diversity_threshold must be in [0, 1]");
     }
+    if (params.diversity_metric != "edge" && params.diversity_metric != "hamming") {
+        throw std::invalid_argument("QLSA diversity_metric must be edge or hamming");
+    }
     if (params.sa.iterations < 0) {
         throw std::invalid_argument("iterations must be non-negative");
     }
@@ -169,13 +172,64 @@ int apply_one_2opt_metropolis(Tour& tour,
     return length;
 }
 
-int diversity_state(const Tour& current, const Tour& best, double threshold) {
+void refresh_edge_diversity_cache(QLSAState& state) {
+    if (state.params.diversity_metric != "edge") {
+        return;
+    }
+
+    const size_t n = state.best_tour.size();
+    std::vector<int>& neighbors = state.edge_diversity_best_neighbors;
+    if (neighbors.size() != n * 2U) {
+        neighbors.resize(n * 2U);
+    }
+    std::fill(neighbors.begin(), neighbors.end(), -1);
+
+    for (size_t i = 0; i < n; ++i) {
+        const int city = state.best_tour[i];
+        if (city < 0 || static_cast<size_t>(city) >= n) {
+            throw std::invalid_argument("QLSA edge diversity requires a legal best tour");
+        }
+        const size_t offset = static_cast<size_t>(city) * 2U;
+        neighbors[offset] = state.best_tour[(i + n - 1U) % n];
+        neighbors[offset + 1U] = state.best_tour[(i + 1U) % n];
+    }
+}
+
+double cached_edge_diversity_ratio(const QLSAState& state) {
+    const Tour& current = state.current_tour;
     if (current.empty()) {
+        return 0.0;
+    }
+    const std::vector<int>& neighbors = state.edge_diversity_best_neighbors;
+    if (neighbors.size() != current.size() * 2U) {
+        throw std::logic_error("QLSA edge diversity cache does not match the current tour");
+    }
+
+    int differing_edges = 0;
+    for (size_t i = 0; i < current.size(); ++i) {
+        const int city = current[i];
+        const int next = current[(i + 1U) % current.size()];
+        if (city < 0 || static_cast<size_t>(city) >= current.size()) {
+            throw std::invalid_argument("QLSA edge diversity requires a legal current tour");
+        }
+        const size_t offset = static_cast<size_t>(city) * 2U;
+        if (neighbors[offset] != next && neighbors[offset + 1U] != next) {
+            ++differing_edges;
+        }
+    }
+    return static_cast<double>(differing_edges) / static_cast<double>(current.size());
+}
+
+int diversity_state(const QLSAState& state) {
+    if (state.current_tour.empty()) {
         return 0;
     }
-    const double diversity =
-        static_cast<double>(hamming_distance(current, best)) / static_cast<double>(current.size());
-    return diversity >= threshold ? 1 : 0;
+    const double diversity = state.params.diversity_metric == "edge"
+                                 ? cached_edge_diversity_ratio(state)
+                                 : qlsa_diversity_ratio(state.current_tour,
+                                                        state.best_tour,
+                                                        state.params.diversity_metric);
+    return diversity >= state.params.diversity_threshold ? 1 : 0;
 }
 
 constexpr int kCandidateLeaderActionCount = 4;
@@ -268,6 +322,24 @@ double qlsa_reward_from_delta(int delta, bool accepted) {
     return delta > 0 ? -0.1 * static_cast<double>(delta) : 0.0;
 }
 
+double qlsa_diversity_ratio(const Tour& current, const Tour& best, const std::string& metric) {
+    if (current.size() != best.size()) {
+        throw std::invalid_argument("QLSA diversity requires equal-length tours");
+    }
+    if (current.empty()) {
+        return 0.0;
+    }
+    if (metric == "edge") {
+        return static_cast<double>(undirected_edge_distance(current, best)) /
+               static_cast<double>(current.size());
+    }
+    if (metric == "hamming") {
+        return static_cast<double>(hamming_distance(current, best)) /
+               static_cast<double>(current.size());
+    }
+    throw std::invalid_argument("QLSA diversity_metric must be edge or hamming");
+}
+
 void update_q_value(std::vector<std::vector<double>>& q_table,
                     int state,
                     int action,
@@ -339,7 +411,7 @@ QLSAState initialize_qlsa_state(const DistanceMatrix& dm, const QLSAParams& para
     state.params = params;
     state.rng = Rng(params.sa.seed);
     state.current_tour = params.sa.use_nearest_neighbor_init
-                             ? nearest_neighbor_tour(dm)
+                             ? nearest_neighbor_tour(dm, params.sa.nearest_neighbor_start)
                              : random_tour(dm.size(), state.rng);
     state.current_length = tour_length(state.current_tour, dm);
     state.best_tour = state.current_tour;
@@ -364,11 +436,10 @@ QLSAState initialize_qlsa_state(const DistanceMatrix& dm, const QLSAParams& para
                              std::vector<double>(static_cast<size_t>(kCandidateLeaderActionCount),
                                                  0.0));
         state.action_counts.assign(static_cast<size_t>(kCandidateLeaderActionCount), 0);
-        state.learning_state = params.variant == "paper-sb"
-                                   ? diversity_state(state.current_tour,
-                                                     state.best_tour,
-                                                     params.diversity_threshold)
-                                   : 0;
+        if (params.variant == "paper-sb" && params.diversity_metric == "edge") {
+            refresh_edge_diversity_cache(state);
+        }
+        state.learning_state = params.variant == "paper-sb" ? diversity_state(state) : 0;
     }
 
     state.initialized = true;
@@ -504,15 +575,15 @@ SearchChunkProgress run_qlsa_chunk(const DistanceMatrix& dm,
                 if (state.current_length < state.best_length) {
                     state.best_length = state.current_length;
                     state.best_tour = state.current_tour;
+                    if (state.params.variant == "paper-sb" &&
+                        state.params.diversity_metric == "edge") {
+                        refresh_edge_diversity_cache(state);
+                    }
                 }
             }
 
             const double reward = std::max(0, previous_length - state.current_length);
-            const int next_state = state.params.variant == "paper-sb"
-                                       ? diversity_state(state.current_tour,
-                                                         state.best_tour,
-                                                         state.params.diversity_threshold)
-                                       : 0;
+            const int next_state = state.params.variant == "paper-sb" ? diversity_state(state) : 0;
             update_q_value(state.q_table,
                            state.learning_state,
                            action_index,
@@ -567,11 +638,18 @@ bool migrate_qlsa_tour(const DistanceMatrix& dm, QLSAState& state, const Tour& m
     if (migrant_length < state.best_length) {
         state.best_tour = migrant;
         state.best_length = migrant_length;
+        if (state.params.variant == "paper-sb" && state.params.diversity_metric == "edge") {
+            refresh_edge_diversity_cache(state);
+        }
     }
-    if (state.params.variant == "paper-sb") {
-        state.learning_state = diversity_state(state.current_tour,
-                                               state.best_tour,
-                                               state.params.diversity_threshold);
+    if (state.params.variant == "current") {
+        state.recent_deltas.clear();
+        state.recent_delta_sum = 0.0;
+        state.learning_state = qlsa_state_from_average_delta(0.0, state.params.delta_scale);
+    } else if (state.params.variant == "paper-sb") {
+        state.learning_state = diversity_state(state);
+    } else {
+        state.learning_state = 0;
     }
     return true;
 }

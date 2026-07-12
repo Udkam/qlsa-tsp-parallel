@@ -268,6 +268,9 @@ def validate_config(config: dict[str, Any]) -> None:
     require_positive_int(execution.get("chains"), "execution.chains")
     require_positive_int(execution.get("threads"), "execution.threads")
     require_positive_int(execution.get("iterations_per_island"), "execution.iterations_per_island")
+    diversity_metric = str(execution.get("qlsa", {}).get("diversity_metric", "hamming"))
+    if diversity_metric not in {"edge", "hamming"}:
+        raise ValueError("execution.qlsa.diversity_metric must be edge or hamming")
     if execution.get("parallel") == "none" and execution.get("threads") != 1:
         raise ValueError("execution.threads must be 1 when execution.parallel is none")
     if execution.get("chains", 0) < 2:
@@ -402,6 +405,8 @@ def build_command(
                 str(qlsa.get("policy", "epsilon-greedy")),
                 "--diversity_threshold",
                 str(qlsa.get("diversity_threshold", 0.5)),
+                "--diversity_metric",
+                str(qlsa.get("diversity_metric", "hamming")),
             ]
         )
     command.append("--csv-only")

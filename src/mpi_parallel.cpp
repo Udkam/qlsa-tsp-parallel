@@ -55,6 +55,10 @@ ChainResult run_one_mpi_chain(const DistanceMatrix& dm,
     if (params.algorithm == AlgorithmKind::SA) {
         SAParams sa_params = params.sa_params;
         sa_params.seed = chain.seed;
+        if (params.chains > 1 && sa_params.use_nearest_neighbor_init) {
+            sa_params.nearest_neighbor_start =
+                seeded_nearest_neighbor_start(chain.seed, dm.size());
+        }
         const SAResult result = run_sa_2opt(dm, sa_params);
         chain.best_tour = result.best_tour;
         chain.best_length = result.best_length;
@@ -67,6 +71,10 @@ ChainResult run_one_mpi_chain(const DistanceMatrix& dm,
 
     QLSAParams qlsa_params = params.qlsa_params;
     qlsa_params.sa.seed = chain.seed;
+    if (params.chains > 1 && qlsa_params.sa.use_nearest_neighbor_init) {
+        qlsa_params.sa.nearest_neighbor_start =
+            seeded_nearest_neighbor_start(chain.seed, dm.size());
+    }
     const QLSAResult result = run_qlsa_2opt(dm, qlsa_params);
     chain.best_tour = result.best_tour;
     chain.best_length = result.best_length;

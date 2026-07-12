@@ -17,6 +17,9 @@ struct SAParams {
     double final_temperature = 1e-3;
     uint64_t seed = 1;
     bool use_nearest_neighbor_init = true;
+    // Direct/single-chain callers retain the historical city-0 start. Parallel
+    // coordinators set this from each chain seed to diversify NN initial tours.
+    int nearest_neighbor_start = 0;
 };
 
 struct SAResult {
@@ -29,6 +32,11 @@ struct SAResult {
     int64_t iterations_completed = 0;
     bool deadline_reached = false;
 };
+
+// Maps a chain seed to a valid NN starting city without consuming the search
+// RNG stream. Parallel coordinators use it only when they have multiple
+// chains, preserving the legacy city-0 start for standalone runs.
+[[nodiscard]] int seeded_nearest_neighbor_start(uint64_t seed, int city_count);
 
 using SearchClock = std::chrono::steady_clock;
 

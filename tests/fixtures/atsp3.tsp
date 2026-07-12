@@ -1,0 +1,11 @@
+NAME: atsp3
+TYPE: ATSP
+COMMENT: Must be rejected because this solver's 2-opt delta is symmetric-only.
+DIMENSION: 3
+EDGE_WEIGHT_TYPE: EXPLICIT
+EDGE_WEIGHT_FORMAT: FULL_MATRIX
+EDGE_WEIGHT_SECTION
+0 1 4
+2 0 3
+1 5 0
+EOF

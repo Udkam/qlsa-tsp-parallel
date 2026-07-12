@@ -1066,3 +1066,51 @@ py scripts\check_report_format.py
 ```
 
 结果均通过。
+
+## 2026-07-13 优先正确性与可复现性改进
+
+本轮先处理会影响算法有效性、实验可解释性和本地构建复现的问题，未重写课程报告或重跑正式结果。
+
+### 对称 TSP 问题域保护
+
+- 解析器现在明确拒绝 `TYPE: ATSP`，并拒绝非对称的 `EXPLICIT/FULL_MATRIX`；`DistanceMatrix` 对手工构造的 `Instance` 也执行同样校验。
+- 原因是当前 O(1) 2-opt 增量公式以对称距离为前提。继续在 ATSP 上运行会得到不正确的长度增量，不能用“可运行”替代“算法正确”。
+- 新增 ATSP、非对称矩阵和对称矩阵 fixture/回归测试，错误消息会指出不支持的输入和原因。
+
+### 多链初始化、QLSA 状态与实验语义
+
+- 多链 `--init nn` 现在从每条链的既有 seed 派生最近邻起点；单链仍从 city 0 启动。CPU/OpenMP、MPI、island 和 CUDA chain/candidate 路径均使用同一规则，避免所有链因固定 NN 起点而过早同质化。
+- `paper-sb` 新增 `--diversity_metric edge|hamming`：默认 `edge` 用无向回路边集差异，循环移位或反向表示同一对称 TSP 回路时多样性为零；`hamming` 保留论文和历史 CSV 的 position-Hamming 定义。
+- `edge` 的 best-tour 邻接表在每条 QLSA state 初始化或全局最优改进时复用，不会在每次迭代构造 `unordered_set`，避免把多样性判断变成高频堆分配热点。
+- 公平实验和 island 消融的保存配置显式固定 `hamming`，避免与新的默认 `edge` 样本混合。迁移接受外来解后会清除 `current` QLSA 的近期增量窗口，并按变体/metric 重算学习状态。
+- `run_qlsa_variant_experiments.py` 同时修复了扩展后的 28 列程序 CSV 被静默忽略、导致“wrote 0 rows”的问题；输出会记录 paper-sb 的 diversity metric。
+- CUDA QLSA 的公开库入口与 CLI 一致，只接受 `current` 变体；即使 CUDA 未编译或运行时无 GPU，也不会静默将 `paper`/`paper-sb` 切换成 CPU fallback。
+
+### CMake 路径与后端复现
+
+- 清理遗留的旧 OneDrive 源目录缓存后，重新生成了本地 Ninja CUDA 构建目录。
+- CMake 最低版本提高到 3.24；CUDA 架构默认采用 `native`，替代陈旧的固定 `sm_70`。可通过 `TSP_CUDA_ARCHITECTURES=86;89` 等值固定可分发/CI 目标。
+- 新增 `CMakePresets.json`：Ninja 与 VS2022 的 CPU+OpenMP、CUDA+OpenMP Release 预设；严格 preset 缺少 CUDA/OpenMP 会在配置阶段失败，手工配置仍可选择降级。
+- QLSA variant runner 和公平/island 配置的 executable candidates 已纳入 Ninja/VS preset 输出目录；使用严格 preset 后不会因仍只查找旧 `build-cuda-ninja` 而找不到程序。
+
+### 本轮验证
+
+```powershell
+cmd /c "call ""C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"" -arch=x64 && cmake --preset ninja-cuda-release"
+cmd /c "call ""C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"" -arch=x64 && cmake --build --preset build-ninja-cuda-release --parallel"
+ctest --preset test-ninja-cuda-release --output-on-failure
+ctest --preset test-ninja-cpu-release --output-on-failure
+py -S -m unittest -v tests.test_fair_experiment_pipeline tests.test_fair_runner_validation tests.test_fair_analyzer_integrity tests.test_island_ablation_pipeline tests.test_island_runner_hardening tests.test_island_analyzer_hardening tests.test_qlsa_variant_runner
+py scripts\check_privacy_and_encoding.py
+py scripts\check_report_format.py docs\final\report.md
+py scripts\check_report_assets.py
+py scripts\check_final_submission.py
+```
+
+- CUDA/OpenMP preset 和 CPU/OpenMP preset 均为 CTest **8/8** 通过；Python 流水线回归为 **62/62** 通过。
+- `tsp_sa --input tests/fixtures/atsp3.tsp` 以明确的对称 TSP 限制错误退出。
+
+### 结果边界
+
+- 既有多链 NN 结果来自修复前固定 city 0 的初始化；旧 `paper-sb` 结果使用 Hamming metric。它们可作为历史记录，但不能与新默认行为直接合并统计。
+- 如需发布新默认行为的性能或质量结论，应使用固定 seed、匹配预算和完整 paired-seed 设计重跑，而不是在旧 CSV 上追加样本。

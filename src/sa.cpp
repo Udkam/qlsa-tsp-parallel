@@ -73,6 +73,13 @@ void verify_sa_state(const DistanceMatrix& dm, const SAState& state) {
 
 }  // namespace
 
+int seeded_nearest_neighbor_start(uint64_t seed, int city_count) {
+    if (city_count <= 0) {
+        throw std::invalid_argument("seeded_nearest_neighbor_start requires a positive city count");
+    }
+    return static_cast<int>(seed % static_cast<uint64_t>(city_count));
+}
+
 SAState initialize_sa_state(const DistanceMatrix& dm, const SAParams& params) {
     validate_sa_params(dm, params);
     Timer timer;
@@ -80,8 +87,9 @@ SAState initialize_sa_state(const DistanceMatrix& dm, const SAParams& params) {
     SAState state;
     state.params = params;
     state.rng = Rng(params.seed);
-    state.current_tour = params.use_nearest_neighbor_init ? nearest_neighbor_tour(dm)
-                                                          : random_tour(dm.size(), state.rng);
+    state.current_tour = params.use_nearest_neighbor_init
+                             ? nearest_neighbor_tour(dm, params.nearest_neighbor_start)
+                             : random_tour(dm.size(), state.rng);
     state.current_length = tour_length(state.current_tour, dm);
     state.best_tour = state.current_tour;
     state.best_length = state.current_length;

@@ -426,6 +426,9 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ValueError("execution.parallel must be none, omp, or cuda")
     require_positive_int(execution.get("chains"), "execution.chains")
     require_positive_int(execution.get("threads"), "execution.threads")
+    diversity_metric = str(execution.get("qlsa", {}).get("diversity_metric", "hamming"))
+    if diversity_metric not in {"edge", "hamming"}:
+        raise ValueError("execution.qlsa.diversity_metric must be edge or hamming")
 
     budgets = config.get("budgets", {})
     if "equal-proposals" in budgets:
@@ -571,6 +574,8 @@ def build_command(
                 str(qlsa.get("policy", "epsilon-greedy")),
                 "--diversity_threshold",
                 str(qlsa.get("diversity_threshold", 0.5)),
+                "--diversity_metric",
+                str(qlsa.get("diversity_metric", "hamming")),
             ]
         )
     command.append("--csv-only")

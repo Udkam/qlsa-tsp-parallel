@@ -2,6 +2,15 @@
 
 本文件记录 `parallel-algorithm` 项目的阶段性处理结果，便于后续继续维护。所有中文内容应保持 UTF-8 编码；如果发现四个连续问号、Unicode replacement character（U+FFFD）、常见 GBK/UTF-8 错配片段或类似乱码，应立即定位并修复，不应继续在损坏文本上追加内容。
 
+## 2026-07-13：报告口径与 QLSA 图表同步
+
+- 本地课程报告源 `docs/final/report.md` 与交付 PDF `小组及个人报告.pdf` 已按小组报告的“结论—证据—解释—边界”结构更新，并重新导出为 35 页 A4 PDF 后逐页抽查版式。两者按 `.gitignore` 约定保留在本地，不作为公开仓库文件提交。
+- 明确当前实现的正确性边界：2-opt 的常数时间增量仅适用于对称 TSP；解析器和 `DistanceMatrix` 都会拒绝 ATSP 与非对称 `EXPLICIT/FULL_MATRIX`。多链最近邻初始化现由链 seed 派生起点，而单链仍从 city 0 出发。
+- 明确区分 `paper-sb` 的两种状态语义：历史正式样本使用论文兼容的 position-Hamming；当前工程还提供以无向回路边差异定义的 `edge`。历史多链 NN 同时使用固定 city 0 起点，因此不把这些归档数值写成新 `edge`/seeded-NN 默认值的性能结论。
+- 修正 `scripts/analyze_qlsa_variant_experiments.py` 的汇总键，将 `diversity_metric` 纳入条件；旧 raw CSV 缺少该字段时仅对 `paper-sb` 显式归一为 `hamming`。这样 edge 与 Hamming 新旧样本不会被错误合并。
+- 已从同一份历史 raw CSV 重生成 `results/summary/qlsa_variant_alignment_summary.csv`、`docs/dev/qlsa_variant_alignment_analysis.md` 和 `figures/fig_qlsa_variant_alignment.png`。图内标题与图例均标注 `paper-sb: Hamming`，数值未被修改；其余性能图因没有新配对实验而保持历史图表不变。
+- 已通过报告格式/资源/UTF-8/提交资料检查、64 个 Python 测试，以及 CUDA+OpenMP Ninja 预设下的 8 个 CTest。新 seed-NN 或 edge 的效果仍需以共同种子、相同预算的完整实验矩阵重新测量后再更新第 7 节全部相关表图。
+
 ## 当前报告定位
 
 当前课程报告重写稿：

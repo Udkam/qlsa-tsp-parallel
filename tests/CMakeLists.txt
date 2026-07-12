@@ -132,6 +132,7 @@ if(Python3_Interpreter_FOUND)
                 tests.test_island_runner_hardening
                 tests.test_island_analyzer_hardening
                 tests.test_qlsa_variant_runner
+                tests.test_qlsa_variant_analysis
     )
     set_tests_properties(test_experiment_pipelines PROPERTIES
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}

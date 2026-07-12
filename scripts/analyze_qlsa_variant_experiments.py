@@ -46,19 +46,35 @@ def stddev(values: list[float]) -> float:
     return math.sqrt(sum((v - m) ** 2 for v in values) / (len(values) - 1))
 
 
+def normalized_diversity_metric(row: dict[str, str]) -> str:
+    """Return the paper-sb metric while preserving legacy raw CSV semantics."""
+    if row.get("qlsa_variant", "") != "paper-sb":
+        return ""
+    metric = row.get("diversity_metric", "").strip().lower()
+    # Before the metric column existed, paper-sb implemented the paper's
+    # position-Hamming state. Treat those archived rows explicitly as hamming
+    # instead of silently mixing them with a new edge run.
+    if not metric:
+        return "hamming"
+    if metric not in {"edge", "hamming"}:
+        raise ValueError(f"unsupported paper-sb diversity_metric: {metric}")
+    return metric
+
+
 def group_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
-    groups: dict[tuple[str, str, str, str], list[dict[str, str]]] = defaultdict(list)
+    groups: dict[tuple[str, str, str, str, str], list[dict[str, str]]] = defaultdict(list)
     for row in rows:
         key = (
             row["instance"],
             row.get("qlsa_variant", ""),
             row.get("policy", ""),
             row.get("diversity_threshold", ""),
+            normalized_diversity_metric(row),
         )
         groups[key].append(row)
 
     summary: list[dict[str, str]] = []
-    for (instance, variant, policy, threshold), items in sorted(groups.items()):
+    for (instance, variant, policy, threshold, metric), items in sorted(groups.items()):
         bks = BKS.get(instance)
         best_values = [int(float(item["best_length"])) for item in items]
         elapsed = [float(item["elapsed_ms"]) for item in items]
@@ -73,6 +89,7 @@ def group_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
             "qlsa_variant": variant,
             "policy": policy,
             "diversity_threshold": threshold,
+            "diversity_metric": metric,
             "runs": str(len(items)),
             "iterations": items[0].get("iterations", ""),
             "chains": items[0].get("chains", ""),
@@ -97,6 +114,7 @@ def write_summary(path: Path, rows: list[dict[str, str]]) -> None:
         "qlsa_variant",
         "policy",
         "diversity_threshold",
+        "diversity_metric",
         "runs",
         "iterations",
         "chains",
@@ -117,10 +135,22 @@ def write_summary(path: Path, rows: list[dict[str, str]]) -> None:
         writer.writerows(rows)
 
 
-def best_per_instance(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+def best_per_variant_and_metric(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     selected: list[dict[str, str]] = []
-    for instance in sorted({row["instance"] for row in rows}):
-        candidates = [row for row in rows if row["instance"] == instance]
+    conditions = sorted(
+        {
+            (row["instance"], row["qlsa_variant"], row.get("diversity_metric", ""))
+            for row in rows
+        }
+    )
+    for instance, variant, metric in conditions:
+        candidates = [
+            row
+            for row in rows
+            if row["instance"] == instance
+            and row["qlsa_variant"] == variant
+            and row.get("diversity_metric", "") == metric
+        ]
         candidates.sort(key=lambda r: (float(r["gap_min"]), float(r["elapsed_ms_mean"])))
         selected.append(candidates[0])
     return selected
@@ -128,23 +158,26 @@ def best_per_instance(rows: list[dict[str, str]]) -> list[dict[str, str]]:
 
 def write_markdown(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    best_rows = best_per_instance(rows)
+    best_rows = best_per_variant_and_metric(rows)
     lines = [
         "# QLSA 变体对齐实验分析",
         "",
         "本实验比较 `current`、`paper` 与 `paper-sb` 三种 QLSA 入口。`current` 是已有工程化状态/动作版本，`paper` 使用 candidate-leader 来源选择，`paper-sb` 在 candidate-leader 上加入路径多样性状态。",
         "",
+        "历史 raw CSV 没有 diversity metric 列时，`paper-sb` 行按当时实现明确标为 `hamming`；新的 `edge` 样本会作为独立条件汇总，不能与 Hamming 合并。",
+        "",
         "实验目的不是替换已有 Step 5/6 结果，而是确认论文机制对齐变体已经进入同一 C++/OpenMP 实验流程，并观察其在代表实例上的质量和时间代价。",
         "",
-        "## 每个实例的最佳配置",
+        "## 各变体与度量条件的最佳配置",
         "",
-        "| 实例 | 变体 | 策略 | 阈值 | 最短路径 | 最小偏差 | 平均时间(ms) |",
-        "|---|---|---|---:|---:|---:|---:|",
+        "| 实例 | 变体 | 多样性度量 | 策略 | 阈值 | 最短路径 | 最小偏差 | 平均时间(ms) |",
+        "|---|---|---|---|---:|---:|---:|---:|",
     ]
     for row in best_rows:
         threshold = row["diversity_threshold"] or "-"
+        metric = row.get("diversity_metric", "") or "-"
         lines.append(
-            f"| {row['instance']} | {row['qlsa_variant']} | {row['policy']} | {threshold} | "
+            f"| {row['instance']} | {row['qlsa_variant']} | {metric} | {row['policy']} | {threshold} | "
             f"{row['best_length_min']} | {float(row['gap_min']):.4f}% | {float(row['elapsed_ms_mean']):.2f} |"
         )
     lines.extend([
@@ -152,7 +185,7 @@ def write_markdown(path: Path, rows: list[dict[str, str]]) -> None:
         "## 解释",
         "",
         "- `paper` / `paper-sb` 的动作对象是候选来源，而不是 2-opt 跨度范围，因此它们与 `current` 的搜索行为不同。",
-        "- `paper-sb` 的 diversity state 让 Q 表能区分当前路径与历史最优路径是否相近，适合观察论文状态机制的工程化效果。",
+        "- `paper-sb` 的 diversity state 让 Q 表能区分当前路径与历史最优路径是否相近；Hamming 与 edge 是不同实验条件，分别报告。",
         "- 若某个实例上 `current` 仍然更好，说明已有工程化动作设计在该预算下更合适；若 `paper` 或 `paper-sb` 更好，则说明 candidate-leader 机制值得进一步调参。",
     ])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -171,34 +204,61 @@ def write_figure(path: Path, rows: list[dict[str, str]]) -> None:
     rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "Arial Unicode MS", "DejaVu Sans"]
     rcParams["axes.unicode_minus"] = False
 
-    best_by_variant: dict[tuple[str, str], float] = {}
+    best_by_variant: dict[tuple[str, str, str], float] = {}
     instances = sorted({row["instance"] for row in rows})
-    variants = ["current", "paper", "paper-sb"]
+    series: list[tuple[str, str]] = [("current", ""), ("paper", "")]
+    paper_sb_metrics = sorted(
+        {row.get("diversity_metric", "") for row in rows if row["qlsa_variant"] == "paper-sb"}
+    )
+    series.extend(("paper-sb", metric) for metric in paper_sb_metrics)
     for instance in instances:
-        for variant in variants:
-            candidates = [row for row in rows if row["instance"] == instance and row["qlsa_variant"] == variant]
+        for variant, metric in series:
+            candidates = [
+                row
+                for row in rows
+                if row["instance"] == instance
+                and row["qlsa_variant"] == variant
+                and row.get("diversity_metric", "") == metric
+            ]
             if candidates:
-                best_by_variant[(instance, variant)] = min(float(row["gap_min"]) for row in candidates)
+                best_by_variant[(instance, variant, metric)] = min(
+                    float(row["gap_min"]) for row in candidates
+                )
 
     x = list(range(len(instances)))
-    width = 0.24
+    width = min(0.24, 0.8 / max(1, len(series)))
     colors = {
-        "current": "#1f77b4",
-        "paper": "#ff7f0e",
-        "paper-sb": "#2ca02c",
+        ("current", ""): "#1f77b4",
+        ("paper", ""): "#ff7f0e",
+        ("paper-sb", "hamming"): "#2ca02c",
+        ("paper-sb", "edge"): "#9467bd",
     }
     labels = {
-        "current": "当前工程化 QLSA",
-        "paper": "候选来源 QLSA",
-        "paper-sb": "带状态候选来源 QLSA",
+        ("current", ""): "当前工程化 QLSA",
+        ("paper", ""): "候选来源 QLSA",
+        ("paper-sb", "hamming"): "带状态候选来源 QLSA（Hamming）",
+        ("paper-sb", "edge"): "带状态候选来源 QLSA（edge）",
     }
 
     fig, ax = plt.subplots(figsize=(9.0, 4.8), dpi=300)
-    for idx, variant in enumerate(variants):
-        values = [best_by_variant.get((instance, variant), 0.0) for instance in instances]
-        offset = (idx - 1) * width
-        ax.bar([v + offset for v in x], values, width=width, label=labels[variant], color=colors[variant])
-    ax.set_title("QLSA 机制对齐变体的最小偏差对比", fontsize=12)
+    for idx, (variant, metric) in enumerate(series):
+        values = [best_by_variant.get((instance, variant, metric), math.nan) for instance in instances]
+        offset = (idx - (len(series) - 1) / 2.0) * width
+        key = (variant, metric)
+        ax.bar(
+            [v + offset for v in x],
+            values,
+            width=width,
+            label=labels[key],
+            color=colors[key],
+        )
+    if paper_sb_metrics == ["hamming"]:
+        title = "QLSA 机制对齐变体的最小偏差对比（paper-sb：Hamming）"
+    elif paper_sb_metrics:
+        title = "QLSA 机制对齐变体的最小偏差对比（paper-sb 按度量分列）"
+    else:
+        title = "QLSA 机制对齐变体的最小偏差对比"
+    ax.set_title(title, fontsize=12)
     ax.set_xlabel("TSPLIB95 实例")
     ax.set_ylabel("最小偏差（%）")
     ax.set_xticks(x)

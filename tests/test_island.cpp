@@ -330,7 +330,7 @@ void test_shared_time_boundary(const tsp::DistanceMatrix& dm) {
     tsp::IslandParams params;
     params.algorithm = tsp::IslandAlgorithm::SA;
     params.island_count = 4;
-    params.threads = 1;
+    params.threads = 4;
     params.sa_params.iterations = 100000;
     params.sa_params.use_nearest_neighbor_init = false;
     params.migration_interval = 1000;
@@ -341,6 +341,8 @@ void test_shared_time_boundary(const tsp::DistanceMatrix& dm) {
         tsp::run_openmp_islands(dm, params, tsp::MigrationTopology::Ring);
     assert(result.deadline_reached);
     assert(result.total_iterations_completed == 0);
+    assert(result.actual_threads == 1);
+    assert(!result.used_openmp);
     assert(!result.iteration_budget_exhausted);
     assert(result.migration_rounds == 0);
     assert(tsp::is_valid_tour(result.best_tour, dm.size()));

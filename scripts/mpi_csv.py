@@ -1,4 +1,4 @@
-"""Strict parser and contract checks for the 16-column ``tsp_sa_mpi`` CSV."""
+"""Strict parser and contract checks for current and legacy ``tsp_sa_mpi`` CSV."""
 
 from __future__ import annotations
 
@@ -112,7 +112,7 @@ def validate_mpi_execution_contract(
     source: str = "tsp_sa_mpi output",
     require_current_schema: bool = True,
 ) -> None:
-    """Require one exact 16-column MPI result for each requested repeat."""
+    """Require one contract-complete MPI result for each requested repeat."""
 
     if contract.repeat <= 0:
         raise MpiCsvError("repeat must be positive")

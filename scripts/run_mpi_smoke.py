@@ -83,6 +83,8 @@ def find_executable(candidates: List[Path]) -> Optional[Path]:
 def find_tsp_sa() -> Optional[Path]:
     return find_executable(
         [
+            ROOT / "build" / "ninja-mpi-release" / "tsp_sa.exe",
+            ROOT / "build" / "ninja-mpi-release" / "tsp_sa",
             ROOT / "build" / "ninja-cpu-release" / "tsp_sa.exe",
             ROOT / "build" / "ninja-cpu-release" / "tsp_sa",
             ROOT / "build" / "ninja-cuda-release" / "tsp_sa.exe",
@@ -103,6 +105,8 @@ def find_tsp_sa_mpi() -> Optional[Path]:
             ROOT / "build" / "ninja-mpi-release" / "tsp_sa_mpi",
             ROOT / "build-cuda-ninja" / "tsp_sa_mpi.exe",
             ROOT / "build-cuda-ninja" / "tsp_sa_mpi",
+            ROOT / "build-mpi" / "tsp_sa_mpi.exe",
+            ROOT / "build-mpi" / "tsp_sa_mpi",
             ROOT / "build" / "Release" / "tsp_sa_mpi.exe",
             ROOT / "build" / "tsp_sa_mpi",
         ]

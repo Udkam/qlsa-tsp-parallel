@@ -2,6 +2,16 @@
 
 本文件记录 `parallel-algorithm` 项目的阶段性处理结果，便于后续继续维护。所有中文内容应保持 UTF-8 编码；如果发现四个连续问号、Unicode replacement character（U+FFFD）、常见 GBK/UTF-8 错配片段或类似乱码，应立即定位并修复，不应继续在损坏文本上追加内容。
 
+## 2026-07-16：核心性能优化与实验合同闭环
+
+- QLSA softmax 权重改为链内工作区复用，近期增量窗口改为定长环形缓冲；OpenMP island 在全部迁移轮次中复用一个并行团队，并以 barrier + single 保持 chunk/迁移边界。
+- `ccc0b57` 与 `a749f9a` 使用同一 MSVC 19.44、Release、Ninja/OpenMP 构建合同完成 20 组共同种子 AB/BA 配对。a280 QLSA 组合优化的配对中位加速比为 1.2971，eil76 ring-island 组合优化为 1.5586；全部非计时输出字段逐对一致。
+- 普通 CLI runner 统一读取 14/22/27/28 列输出，新实验严格要求 28 列并核对算法标签、seed 序列、初始化、requested/actual backend、fallback、实际线程数、完成迭代和 deadline。
+- MPI + OpenMP 新增 19 列结果合同，记录归约后的实际线程数、完成迭代和 deadline；accepted/improved/iterations/deadline/actual_threads 在所有 rank 上生成一致的全局统计。旧 16 列格式保留历史读取入口。
+- CUDA 在设备检测与 CPU fallback 前执行同一请求校验，统一限制 block、候选数、QLSA action 数和 `state_window`；TSPLIB 解析器逐项验证坐标节点 ID 的唯一性与完整性。
+- 报告图建立 CSV/PNG SHA-256 manifest，QLSA 机制对齐汇总、说明与图从同一 raw CSV 重新生成；提交索引新增核心优化 raw/summary 配对数据。
+- 验证结果：86 个 Python 流水线测试、CPU preset 8 个 CTest、真实 CUDA preset 8 个 CTest 全部通过；`test_cuda` 确认 `cuda_available=true`。严格 MPI preset 在本机按设计报告缺少 MPI C++ 工具链，optional MPI 配置路径正常生成。
+
 ## 2026-07-16：报告展示性叙述整理
 
 - 本地课程报告源 `docs/final/report.md` 将边界说明改写为“实现条件—数据来源—数据结论”的展示性叙述：集中说明 Hamming/fixed-city0 历史条件，以及 seeded-NN/edge 的工程设计，删除“报告不做什么”“不能说明什么”一类元叙事。

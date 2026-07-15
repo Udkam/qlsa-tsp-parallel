@@ -18,6 +18,14 @@ cmd /c "call ""C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\T
 ctest --preset test-ninja-cuda-release --output-on-failure
 ```
 
+MPI + OpenMP 使用独立的严格 preset；该 preset 同时要求 MPI C++ 和 OpenMP 工具链：
+
+```powershell
+cmake --preset ninja-mpi-release
+cmake --build --preset build-ninja-mpi-release --parallel
+ctest --preset test-ninja-mpi-release --output-on-failure
+```
+
 ## 默认参数 OpenMP 实验
 
 ```powershell
@@ -37,8 +45,9 @@ scripts\run_targeted_quality.bat
 .\build-cuda-ninja\tsp_sa.exe --qlsa --qlsa_variant paper --input tests\fixtures\square4.tsp --iterations 500 --seed 1 --init random --csv-only
 .\build-cuda-ninja\tsp_sa.exe --qlsa --qlsa_variant paper-sb --diversity_metric hamming --input data\berlin52.tsp --iterations 100000 --seed 1 --init nn --csv-only
 .\build-cuda-ninja\tsp_sa.exe --qlsa --qlsa_variant paper-sb --diversity_metric edge --input data\berlin52.tsp --iterations 100000 --seed 1 --init nn --csv-only
-py scripts\run_qlsa_variant_experiments.py --instances berlin52 eil76 rat99 eil101 --iterations 300000 --repeat 3 --chains 32 --threads 8 --output results\raw\qlsa_variant_alignment_raw.csv
+py scripts\run_qlsa_variant_experiments.py --executable build\ninja-cpu-release\tsp_sa.exe --instances berlin52 eil76 rat99 eil101 --iterations 300000 --repeat 3 --chains 32 --threads 8 --output results\raw\qlsa_variant_alignment_raw.csv
 py scripts\analyze_qlsa_variant_experiments.py --input results\raw\qlsa_variant_alignment_raw.csv --output results\summary\qlsa_variant_alignment_summary.csv --markdown docs\dev\qlsa_variant_alignment_analysis.md --figure figures\fig_qlsa_variant_alignment.png
+py scripts\report_figure_manifest.py --write
 ```
 
 第一条 `paper-sb` 命令保留论文与历史实验使用的 position-Hamming 定义；`edge` 是当前工程默认的回路边集度量，对称 TSP 下对循环移位和反向表示不敏感。两种 metric 的结果不得混合统计。
@@ -93,10 +102,30 @@ Windows 侧分析：
 py scripts\analyze_large_mpi_vm.py --input results\raw\large_mpi_vm_formal_aggressive_raw.csv --output results\summary\large_mpi_vm_formal_aggressive_summary.csv --markdown docs\final\large_mpi_vm_analysis.md --figure figures\fig18_large_mpi_vm_scaling.png
 ```
 
+## 核心优化配对基准
+
+下列命令分别从优化前后提交创建干净工作树，并使用同一 CPU/OpenMP preset 构建。基准脚本核对 Git HEAD、工作树状态、CMake 构建合同，以及二进制、输入和脚本哈希。
+
+```powershell
+git worktree add --detach tmp\benchmark-before-src ccc0b57721135336c2886c100c6bf29a9d49ac17
+git worktree add --detach tmp\benchmark-after-src a749f9a708946005122c1004ed2ed69c87cba6f4
+
+Push-Location tmp\benchmark-before-src
+cmd /c "call ""C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"" -arch=x64 && cmake --preset ninja-cpu-release && cmake --build --preset build-ninja-cpu-release --parallel"
+Pop-Location
+Push-Location tmp\benchmark-after-src
+cmd /c "call ""C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"" -arch=x64 && cmake --preset ninja-cpu-release && cmake --build --preset build-ninja-cpu-release --parallel"
+Pop-Location
+
+py scripts\benchmark_core_optimizations.py --before tmp\benchmark-before-src\build\ninja-cpu-release\tsp_sa.exe --after tmp\benchmark-after-src\build\ninja-cpu-release\tsp_sa.exe --before-source tmp\benchmark-before-src --after-source tmp\benchmark-after-src --pairs 20
+```
+
 ## 报告检查
 
 ```powershell
 py scripts\check_report_format.py docs\final\report.md
 py scripts\check_report_assets.py
 py scripts\check_privacy_and_encoding.py
+py scripts\report_figure_manifest.py
+py scripts\check_final_submission.py
 ```

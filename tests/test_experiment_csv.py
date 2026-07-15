@@ -187,7 +187,7 @@ class RunnerSchemaMigrationTests(unittest.TestCase):
                 backend="cuda",
             )
         )
-        qlsa_line = csv_line(current_values(algorithm="qlsa-current-omp"))
+        qlsa_line = csv_line(current_values(algorithm="qlsa-omp"))
         cases = [
             (self.cuda_candidate.rows_from_stdout, cuda_line, ()),
             (self.cuda_sweep.rows_from_stdout, cuda_line, ()),

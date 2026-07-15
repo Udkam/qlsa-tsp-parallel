@@ -108,16 +108,24 @@ class MpiSmokeSchemaTests(unittest.TestCase):
     def test_smoke_discovers_preset_outputs_and_respects_explicit_mpi_path(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            cpu = root / "build" / "ninja-cpu-release" / "tsp_sa.exe"
+            cpu = root / "build" / "ninja-mpi-release" / "tsp_sa.exe"
             mpi = root / "build" / "ninja-mpi-release" / "tsp_sa_mpi.exe"
             cpu.parent.mkdir(parents=True)
-            mpi.parent.mkdir(parents=True)
             cpu.write_bytes(b"cpu")
             mpi.write_bytes(b"mpi")
             with mock.patch.object(runner, "ROOT", root):
                 self.assertEqual(runner.find_tsp_sa(), cpu)
                 self.assertEqual(runner.find_tsp_sa_mpi(), mpi)
                 self.assertEqual(runner.resolve_mpi_executable(mpi), mpi.resolve())
+
+    def test_smoke_preserves_legacy_build_mpi_discovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            mpi = root / "build-mpi" / "tsp_sa_mpi"
+            mpi.parent.mkdir(parents=True)
+            mpi.write_bytes(b"mpi")
+            with mock.patch.object(runner, "ROOT", root):
+                self.assertEqual(runner.find_tsp_sa_mpi(), mpi)
 
     def test_openmp_fallback_keeps_caller_supplied_mpi_defaults(self) -> None:
         row = runner.normalize_row(

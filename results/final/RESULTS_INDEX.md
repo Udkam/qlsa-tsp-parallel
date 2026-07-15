@@ -69,7 +69,14 @@
 | `results/summary/large_openmp_l3_quick_summary.csv` | L3 quick OpenMP 结果。 |
 | `figures/fig_course_11_representative_openmp.png` | 代表实例 OpenMP 压力测试图。 |
 
-## 7. 论文与 Python 参考
+## 7. 核心实现优化配对基准
+
+| 文件 | 用途 |
+|---|---|
+| `results/raw/core_optimization_benchmark_raw.csv` | `ccc0b57` 与 `a749f9a` 的 20 组共同种子、AB/BA 交替顺序原始计时与语义字段。 |
+| `results/summary/core_optimization_benchmark_summary.csv` | QLSA 热循环与 island 组合优化的配对加速比、中位耗时和四分位区间。 |
+
+## 8. 论文与 Python 参考
 
 | 文件 | 用途 |
 |---|---|
@@ -79,7 +86,7 @@
 | `results/summary/python_reference_summary.csv` | Python faithful baseline 与 C++ 对照。 |
 | `figures/fig_course_09_paper_quality.png` | 论文 hard-instance quality 对比图。 |
 
-## 8. 结论边界
+## 9. 结论边界
 
 - OpenMP multi-chain 是当前主要性能结论。
 - CUDA candidate-level evaluation 是显式启用的 batch proposal 变体，不替代默认 `cuda_mode=chain`。

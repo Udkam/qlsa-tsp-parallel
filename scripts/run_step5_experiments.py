@@ -6,23 +6,26 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+try:
+    from scripts.experiment_csv import (
+        CURRENT_HEADER,
+        ExperimentCsvError,
+        parse_program_rows,
+        resolve_executable,
+        row_for_output,
+        validate_command_output,
+    )
+except ModuleNotFoundError:  # Direct ``python scripts/...`` invocation.
+    from experiment_csv import (  # type: ignore[no-redef]
+        CURRENT_HEADER,
+        ExperimentCsvError,
+        parse_program_rows,
+        resolve_executable,
+        row_for_output,
+        validate_command_output,
+    )
 
-CSV_HEADER = [
-    "algorithm",
-    "instance",
-    "dimension",
-    "iterations",
-    "seed",
-    "init",
-    "chains",
-    "threads",
-    "parallel",
-    "best_length",
-    "final_length",
-    "elapsed_ms",
-    "accepted_moves",
-    "improved_moves",
-]
+CSV_HEADER = CURRENT_HEADER
 
 ALGORITHMS = {
     "sa",
@@ -47,13 +50,14 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--input-dir", default="data")
     parser.add_argument("--output", default="results/step5_raw.csv")
+    parser.add_argument("--executable", type=Path, help="Explicit tsp_sa executable path.")
     parser.add_argument("--quick", action="store_true")
     parser.add_argument("--no-cuda", action="store_true")
     parser.add_argument("--no-qlsa", action="store_true")
     return parser.parse_args()
 
 
-def find_executable(root):
+def find_executable(root, explicit=None):
     candidates = [
         root / "build-cuda-ninja" / "tsp_sa.exe",
         root / "build-cuda-ninja" / "tsp_sa",
@@ -61,12 +65,7 @@ def find_executable(root):
         root / "build" / "Release" / "tsp_sa.exe",
         root / "build" / "tsp_sa",
     ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    lines = ["Could not find tsp_sa executable. Tried:"]
-    lines.extend(f"  - {candidate}" for candidate in candidates)
-    raise SystemExit("\n".join(lines))
+    return resolve_executable(explicit, candidates, root=root, description="tsp_sa executable")
 
 
 def command_matrix(exe, input_path, args):
@@ -160,19 +159,14 @@ def safe_name(text):
     return "".join(keep).strip("_")[:160]
 
 
-def extract_csv_rows(stdout):
-    rows = []
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            parsed = next(csv.reader([line]))
-        except csv.Error:
-            continue
-        if len(parsed) == len(CSV_HEADER) and parsed[0] in ALGORITHMS:
-            rows.append(parsed)
-    return rows
+def extract_csv_rows(stdout, qlsa=None):
+    if qlsa is None:
+        predicate = lambda algorithm: algorithm.startswith(("sa", "qlsa"))
+    elif qlsa:
+        predicate = lambda algorithm: algorithm.startswith("qlsa")
+    else:
+        predicate = lambda algorithm: algorithm.startswith("sa")
+    return parse_program_rows(stdout, algorithm_predicate=predicate)
 
 
 def write_log(log_dir, name, command, completed):
@@ -202,9 +196,11 @@ def run_command(command, log_dir, label):
         print(f"[warning] fallback detected for {label}; see {log_path}", flush=True)
     if completed.returncode != 0:
         raise SystemExit(f"Command failed with exit code {completed.returncode}; see {log_path}")
-    rows = extract_csv_rows(completed.stdout)
-    if not rows:
-        raise SystemExit(f"No CSV rows found in command output; see {log_path}")
+    rows = extract_csv_rows(completed.stdout, qlsa="--qlsa" in command)
+    try:
+        validate_command_output(rows, command, source=label)
+    except ExperimentCsvError as exc:
+        raise SystemExit(f"{exc}; see {log_path}") from exc
     return rows
 
 
@@ -243,7 +239,7 @@ def main():
         args.iterations = 100_000
         args.repeat = 1
 
-    exe = find_executable(root)
+    exe = find_executable(root, args.executable)
     input_dir = Path(args.input_dir)
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -254,22 +250,19 @@ def main():
     for instance in args.instances:
         input_path = input_dir / f"{instance}.tsp"
         if not input_path.exists():
-            print(f"[warning] missing {input_path}; skipping {instance}", flush=True)
-            continue
+            raise FileNotFoundError(f"missing requested instance: {input_path}")
         for command in command_matrix(exe, input_path, args):
             label = f"{instance}_{command[command.index('--parallel') + 1]}_{'qlsa' if '--qlsa' in command else 'sa'}"
             all_rows.extend(run_command(command, log_dir, label))
 
+    if not all_rows:
+        raise ExperimentCsvError("no experiment rows were produced")
     with output_path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(CSV_HEADER)
-        writer.writerows(all_rows)
+        writer = csv.DictWriter(f, fieldnames=CSV_HEADER)
+        writer.writeheader()
+        writer.writerows(row_for_output(row, CSV_HEADER) for row in all_rows)
 
     print(f"Wrote raw CSV: {output_path}", flush=True)
-    if not all_rows:
-        print("No experiment rows were produced; skipping analysis.", flush=True)
-        return
-
     summary_path, markdown_path = derived_paths(output_path)
     call_analyzer(root, output_path, summary_path, markdown_path)
 

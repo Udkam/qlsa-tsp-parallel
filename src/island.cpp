@@ -166,7 +166,7 @@ IslandResult run_openmp_islands(const DistanceMatrix& dm,
     int minimum_actual_threads = 1;
     bool entered_openmp_region = false;
 
-    for (;;) {
+    const auto prepare_round = [&]() {
         bool any_remaining = false;
         for (const IslandState& state : states) {
             if (dm.size() >= 3 && iterations_completed(state) < iteration_budget(state)) {
@@ -175,53 +175,26 @@ IslandResult run_openmp_islands(const DistanceMatrix& dm,
             }
         }
         if (!any_remaining) {
-            break;
+            return false;
         }
         if (deadline_expired(deadline)) {
             reached_deadline = true;
-            break;
+            return false;
         }
+        return true;
+    };
 
-#ifdef TSP_HAS_OPENMP
-        if (params.threads > 1 && params.island_count > 1) {
-            int round_actual_threads = 1;
-#pragma omp parallel num_threads(params.threads)
-            {
-#pragma omp single
-                round_actual_threads = omp_get_num_threads();
-#pragma omp for schedule(static)
-                for (int island_id = 0; island_id < params.island_count; ++island_id) {
-                    const int64_t remaining =
-                        iteration_budget(states[static_cast<size_t>(island_id)]) -
-                        iterations_completed(states[static_cast<size_t>(island_id)]);
-                    SearchChunkOptions options;
-                    options.max_iterations = std::min(params.migration_interval, remaining);
-                    options.deadline = deadline;
-                    options.deadline_check_interval = params.deadline_check_interval;
-                    progress[static_cast<size_t>(island_id)] =
-                        run_state_chunk(dm, states[static_cast<size_t>(island_id)], options);
-                }
-            }
-            minimum_actual_threads = entered_openmp_region
-                                         ? std::min(minimum_actual_threads, round_actual_threads)
-                                         : round_actual_threads;
-            entered_openmp_region = true;
-        } else
-#endif
-        {
-            for (int island_id = 0; island_id < params.island_count; ++island_id) {
-                const int64_t remaining =
-                    iteration_budget(states[static_cast<size_t>(island_id)]) -
-                    iterations_completed(states[static_cast<size_t>(island_id)]);
-                SearchChunkOptions options;
-                options.max_iterations = std::min(params.migration_interval, remaining);
-                options.deadline = deadline;
-                options.deadline_check_interval = params.deadline_check_interval;
-                progress[static_cast<size_t>(island_id)] =
-                    run_state_chunk(dm, states[static_cast<size_t>(island_id)], options);
-            }
-        }
+    const auto run_island_chunk = [&](int island_id) {
+        const size_t index = static_cast<size_t>(island_id);
+        const int64_t remaining = iteration_budget(states[index]) - iterations_completed(states[index]);
+        SearchChunkOptions options;
+        options.max_iterations = std::min(params.migration_interval, remaining);
+        options.deadline = deadline;
+        options.deadline_check_interval = params.deadline_check_interval;
+        progress[index] = run_state_chunk(dm, states[index], options);
+    };
 
+    const auto complete_round = [&]() {
         bool made_progress = false;
         for (const SearchChunkProgress& chunk : progress) {
             made_progress = made_progress || chunk.iterations_completed > 0;
@@ -229,7 +202,7 @@ IslandResult run_openmp_islands(const DistanceMatrix& dm,
         }
         reached_deadline = reached_deadline || deadline_expired(deadline);
         if (reached_deadline || !made_progress) {
-            break;
+            return false;
         }
 
         bool all_finished = true;
@@ -237,7 +210,7 @@ IslandResult run_openmp_islands(const DistanceMatrix& dm,
             all_finished = all_finished && iterations_completed(state) >= iteration_budget(state);
         }
         if (all_finished) {
-            break;
+            return false;
         }
 
         if (topology == MigrationTopology::Ring) {
@@ -275,6 +248,46 @@ IslandResult run_openmp_islands(const DistanceMatrix& dm,
                 }
             }
             ++migration_rounds;
+        }
+        return true;
+    };
+
+    bool run_round = prepare_round();
+#ifdef TSP_HAS_OPENMP
+    if (run_round && params.threads > 1 && params.island_count > 1) {
+        // Keep one OpenMP team alive across all migration chunks. The implicit
+        // barriers after `single` and `for` preserve the old snapshot/migrate
+        // boundary: workers finish one chunk before a single coordinator reads
+        // or replaces any island state.
+#pragma omp parallel num_threads(params.threads)
+        {
+#pragma omp single
+            {
+                minimum_actual_threads = omp_get_num_threads();
+                entered_openmp_region = true;
+            }
+
+            while (run_round) {
+#pragma omp for schedule(static)
+                for (int island_id = 0; island_id < params.island_count; ++island_id) {
+                    run_island_chunk(island_id);
+                }
+
+#pragma omp single
+                { run_round = complete_round(); }
+            }
+        }
+    } else
+#endif
+    {
+        while (run_round) {
+            for (int island_id = 0; island_id < params.island_count; ++island_id) {
+                run_island_chunk(island_id);
+            }
+            if (!complete_round()) {
+                break;
+            }
+            run_round = prepare_round();
         }
     }
 

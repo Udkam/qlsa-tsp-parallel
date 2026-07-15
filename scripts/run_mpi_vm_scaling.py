@@ -15,7 +15,20 @@ import sys
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import DefaultDict, Dict, List, NamedTuple, Optional, Tuple
+from typing import DefaultDict, Dict, List, Mapping, NamedTuple, Optional, Tuple
+
+try:
+    from scripts.mpi_csv import (
+        MpiExecutionContract,
+        parse_mpi_program_rows,
+        validate_mpi_execution_contract,
+    )
+except ModuleNotFoundError:  # Direct ``python scripts/...`` invocation.
+    from mpi_csv import (  # type: ignore[no-redef]
+        MpiExecutionContract,
+        parse_mpi_program_rows,
+        validate_mpi_execution_contract,
+    )
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +51,9 @@ RAW_HEADER = [
     "improved_moves",
     "mpi_ranks",
     "communication_ms",
+    "actual_threads",
+    "iterations_completed",
+    "deadline_reached",
     "hostfile",
 ]
 SUMMARY_HEADER = [
@@ -106,18 +122,8 @@ def instance_path(name: str) -> Path:
     return ROOT / "data" / f"{name}.tsp"
 
 
-def csv_rows(stdout: str) -> List[List[str]]:
-    rows = []  # type: List[List[str]]
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line or line.startswith("CSV:") or "," not in line:
-            continue
-        first = line.split(",", 1)[0]
-        if first.startswith("sa") or first.startswith("qlsa"):
-            rows.append(next(csv.reader([line])))
-    if not rows:
-        raise RuntimeError("no CSV rows found in command stdout")
-    return rows
+def csv_rows(stdout: str, algorithm: str | None = None) -> List[Dict[str, str]]:
+    return parse_mpi_program_rows(stdout, algorithm=algorithm)
 
 
 def build_command(launcher: str, args: argparse.Namespace, exp: Experiment) -> List[str]:
@@ -166,7 +172,7 @@ def build_command(launcher: str, args: argparse.Namespace, exp: Experiment) -> L
     return cmd
 
 
-def run_command(command: List[str], log_path: Path) -> List[List[str]]:
+def run_command(command: List[str], log_path: Path, args: argparse.Namespace, exp: Experiment) -> List[Dict[str, str]]:
     print("Running:", " ".join(command))
     completed = subprocess.run(
         command,
@@ -188,30 +194,45 @@ def run_command(command: List[str], log_path: Path) -> List[List[str]]:
     )
     if completed.returncode != 0:
         raise RuntimeError(f"command failed with exit code {completed.returncode}; see {log_path}")
-    return csv_rows(completed.stdout)
+    rows = csv_rows(completed.stdout, exp.algorithm)
+    validate_mpi_execution_contract(
+        rows,
+        MpiExecutionContract(
+            algorithm=exp.algorithm,
+            iterations=args.iterations,
+            chains=exp.chains,
+            threads=exp.threads,
+            ranks=exp.np,
+            repeat=args.repeat,
+            seed=args.seed,
+        ),
+        source=f"{exp.instance} {exp.algorithm} np={exp.np}",
+    )
+    return rows
 
 
-def normalize(command_id: int, raw: List[str], hostfile: Path) -> Dict[str, str]:
-    if len(raw) < 16:
-        raise RuntimeError(f"expected MPI CSV row with at least 16 columns, got {len(raw)}: {raw}")
+def normalize(command_id: int, raw: Mapping[str, str], hostfile: Path) -> Dict[str, str]:
     return {
         "command_id": str(command_id),
-        "algorithm": raw[0],
-        "instance": raw[1],
-        "dimension": raw[2],
-        "iterations": raw[3],
-        "seed": raw[4],
-        "init": raw[5],
-        "chains": raw[6],
-        "threads": raw[7],
-        "parallel": raw[8],
-        "best_length": raw[9],
-        "final_length": raw[10],
-        "elapsed_ms": raw[11],
-        "accepted_moves": raw[12],
-        "improved_moves": raw[13],
-        "mpi_ranks": raw[14],
-        "communication_ms": raw[15],
+        "algorithm": raw["algorithm"],
+        "instance": raw["instance"],
+        "dimension": raw["dimension"],
+        "iterations": raw["iterations"],
+        "seed": raw["seed"],
+        "init": raw["init"],
+        "chains": raw["chains"],
+        "threads": raw["threads"],
+        "parallel": raw["parallel"],
+        "best_length": raw["best_length"],
+        "final_length": raw["final_length"],
+        "elapsed_ms": raw["elapsed_ms"],
+        "accepted_moves": raw["accepted_moves"],
+        "improved_moves": raw["improved_moves"],
+        "mpi_ranks": raw["mpi_ranks"],
+        "communication_ms": raw["communication_ms"],
+        "actual_threads": raw["actual_threads"],
+        "iterations_completed": raw["iterations_completed"],
+        "deadline_reached": raw["deadline_reached"],
         "hostfile": str(hostfile),
     }
 
@@ -406,8 +427,11 @@ def main() -> int:
         log_path = logs_dir / (
             f"{command_id:03d}_{exp.algorithm}_{exp.instance}_np{exp.np}_t{exp.threads}_c{exp.chains}.log"
         )
-        for row in run_command(build_command(launcher, args, exp), log_path):
+        for row in run_command(build_command(launcher, args, exp), log_path, args, exp):
             raw_rows.append(normalize(command_id, row, args.hostfile))
+
+    if not raw_rows:
+        raise RuntimeError("no MPI experiment rows were produced")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", newline="", encoding="utf-8") as f:

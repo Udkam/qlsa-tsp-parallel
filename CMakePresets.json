@@ -49,6 +49,20 @@
       }
     },
     {
+      "name": "ninja-mpi-release",
+      "displayName": "Ninja MPI + OpenMP (Release)",
+      "description": "Release hybrid build that requires both MPI C++ and OpenMP toolchains.",
+      "inherits": "ninja-base",
+      "cacheVariables": {
+        "TSP_ENABLE_CUDA": "OFF",
+        "TSP_REQUIRE_CUDA": "OFF",
+        "TSP_ENABLE_OPENMP": "ON",
+        "TSP_REQUIRE_OPENMP": "ON",
+        "TSP_ENABLE_MPI": "ON",
+        "TSP_REQUIRE_MPI": "ON"
+      }
+    },
+    {
       "name": "vs2022-base",
       "hidden": true,
       "inherits": "base",
@@ -92,6 +106,10 @@
       "configurePreset": "ninja-cuda-release"
     },
     {
+      "name": "build-ninja-mpi-release",
+      "configurePreset": "ninja-mpi-release"
+    },
+    {
       "name": "build-vs2022-cpu-release",
       "configurePreset": "vs2022-cpu",
       "configuration": "Release"
@@ -110,6 +128,10 @@
     {
       "name": "test-ninja-cuda-release",
       "configurePreset": "ninja-cuda-release"
+    },
+    {
+      "name": "test-ninja-mpi-release",
+      "configurePreset": "ninja-mpi-release"
     },
     {
       "name": "test-vs2022-cpu-release",

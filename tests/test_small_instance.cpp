@@ -108,6 +108,20 @@ int main() {
     tsp::Rng softmax_rng(2);
     assert(tsp::select_qlsa_action({-1000.0, 1000.0, -1000.0}, action_params, softmax_rng) == 1);
 
+    // The state-owned softmax workspace must not alter either the weighted
+    // draw or the RNG stream used by the allocation-free hot path.
+    tsp::Rng softmax_reference_rng(811);
+    tsp::Rng softmax_workspace_rng(811);
+    std::vector<double> softmax_workspace;
+    for (int trial = 0; trial < 64; ++trial) {
+        const int reference = tsp::select_qlsa_action(
+            {-1.25, 0.5, 1.75}, action_params, softmax_reference_rng);
+        const int optimized = tsp::select_qlsa_action(
+            {-1.25, 0.5, 1.75}, action_params, softmax_workspace_rng, &softmax_workspace);
+        assert(reference == optimized);
+    }
+    assert(softmax_workspace.size() == 3);
+
     tsp::QLSAParams qlsa_params;
     qlsa_params.sa = params;
     qlsa_params.sa.iterations = 500;
@@ -131,6 +145,24 @@ int main() {
     const tsp::QLSAResult parsed_result = tsp::run_qlsa_2opt(parsed_dm, qlsa_params);
     assert(tsp::is_valid_tour(parsed_result.best_tour, parsed_dm.size()));
     assert(parsed_result.best_length == 40);
+
+    const std::string duplicate_node_ids_path =
+        std::string(TEST_SOURCE_DIR) + "/fixtures/duplicate_node_ids4.tsp";
+    assert_throws_with_message(
+        [&] { (void)tsp::load_tsplib(duplicate_node_ids_path); },
+        "duplicate node id 2");
+
+    const std::string missing_node_id_path =
+        std::string(TEST_SOURCE_DIR) + "/fixtures/missing_node_id4.tsp";
+    assert_throws_with_message(
+        [&] { (void)tsp::load_tsplib(missing_node_id_path); },
+        "missing node id 2");
+
+    const std::string out_of_range_node_id_path =
+        std::string(TEST_SOURCE_DIR) + "/fixtures/out_of_range_node_id4.tsp";
+    assert_throws_with_message(
+        [&] { (void)tsp::load_tsplib(out_of_range_node_id_path); },
+        "node id exceeds DIMENSION");
 
     const std::string atsp_path = std::string(TEST_SOURCE_DIR) + "/fixtures/atsp3.tsp";
     assert_throws_with_message(

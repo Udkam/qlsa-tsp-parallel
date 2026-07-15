@@ -20,6 +20,28 @@ BKS = {
     "a280": 2579,
 }
 
+BASE_CONTRACT_FIELDS = [
+    "algorithm",
+    "dimension",
+    "iterations",
+    "init",
+    "chains",
+    "threads",
+    "parallel",
+]
+EXTENDED_CONTRACT_FIELDS = [
+    "requested_backend",
+    "actual_backend",
+    "backend_fallback",
+    "iterations_completed",
+    "deadline_reached",
+    "actual_threads",
+]
+SUMMARY_CONTRACT_FIELDS = BASE_CONTRACT_FIELDS + EXTENDED_CONTRACT_FIELDS
+UNIFORM_CONTRACT_FIELDS = [
+    field for field in SUMMARY_CONTRACT_FIELDS if field not in {"algorithm", "dimension"}
+]
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -61,20 +83,100 @@ def normalized_diversity_metric(row: dict[str, str]) -> str:
     return metric
 
 
-def group_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
-    groups: dict[tuple[str, str, str, str, str], list[dict[str, str]]] = defaultdict(list)
-    for row in rows:
-        key = (
-            row["instance"],
-            row.get("qlsa_variant", ""),
-            row.get("policy", ""),
-            row.get("diversity_threshold", ""),
-            normalized_diversity_metric(row),
+def normalized_contract(row: dict[str, str]) -> tuple[str, ...]:
+    """Return the execution contract used to keep unlike runs separate."""
+    return tuple(row.get(field, "").strip() for field in SUMMARY_CONTRACT_FIELDS)
+
+
+def condition_key(row: dict[str, str]) -> tuple[str, ...]:
+    return (
+        row["instance"],
+        row.get("qlsa_variant", ""),
+        row.get("policy", ""),
+        row.get("diversity_threshold", ""),
+        normalized_diversity_metric(row),
+        *normalized_contract(row),
+    )
+
+
+def validate_rows(rows: list[dict[str, str]]) -> None:
+    """Reject incomplete paired grids and heterogeneous execution contracts."""
+    if not rows:
+        raise ValueError("QLSA variant input contains no rows")
+
+    required = {
+        "instance",
+        "seed",
+        "best_length",
+        "elapsed_ms",
+        "accepted_moves",
+        "improved_moves",
+        *BASE_CONTRACT_FIELDS,
+    }
+    for index, row in enumerate(rows, start=2):
+        missing = sorted(field for field in required if not row.get(field, "").strip())
+        if missing:
+            raise ValueError(f"row {index} is missing required fields: {', '.join(missing)}")
+
+    # A single comparison file represents one execution contract. Parameter
+    # scan dimensions (variant/policy/threshold/metric) are deliberately not
+    # part of this check; backend, budget and initialization must be uniform.
+    contracts = {
+        tuple(row.get(field, "").strip() for field in UNIFORM_CONTRACT_FIELDS)
+        for row in rows
+    }
+    if len(contracts) != 1:
+        differing = [
+            field
+            for offset, field in enumerate(UNIFORM_CONTRACT_FIELDS)
+            if len({contract[offset] for contract in contracts}) > 1
+        ]
+        raise ValueError(
+            "QLSA variant input mixes execution contracts: " + ", ".join(differing)
         )
+
+    dimensions_by_instance: dict[str, set[str]] = defaultdict(set)
+    algorithms_by_variant: dict[str, set[str]] = defaultdict(set)
+    for row in rows:
+        dimensions_by_instance[row["instance"]].add(row["dimension"])
+        algorithms_by_variant[row.get("qlsa_variant", "")].add(row["algorithm"])
+    if any(len(values) != 1 for values in dimensions_by_instance.values()):
+        raise ValueError("QLSA variant input maps an instance to multiple dimensions")
+    if any(len(values) != 1 for values in algorithms_by_variant.values()):
+        raise ValueError("QLSA variant input maps a variant to multiple algorithms")
+
+    seeds_by_instance_condition: dict[tuple[str, tuple[str, ...]], set[str]] = defaultdict(set)
+    row_count_by_instance_condition: dict[tuple[str, tuple[str, ...]], int] = defaultdict(int)
+    for row in rows:
+        key = condition_key(row)
+        instance_condition = (row["instance"], key[1:5])
+        seed = row["seed"].strip()
+        seeds_by_instance_condition[instance_condition].add(seed)
+        row_count_by_instance_condition[instance_condition] += 1
+
+    for key, seeds in seeds_by_instance_condition.items():
+        if len(seeds) != row_count_by_instance_condition[key]:
+            raise ValueError(f"duplicate seed in QLSA condition: instance={key[0]}, condition={key[1]}")
+
+    by_instance: dict[str, list[set[str]]] = defaultdict(list)
+    for (instance, _), seeds in seeds_by_instance_condition.items():
+        by_instance[instance].append(seeds)
+    for instance, seed_sets in by_instance.items():
+        expected = seed_sets[0]
+        if any(seeds != expected for seeds in seed_sets[1:]):
+            raise ValueError(f"QLSA variant conditions for {instance} do not share paired seeds")
+
+
+def group_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    validate_rows(rows)
+    groups: dict[tuple[str, ...], list[dict[str, str]]] = defaultdict(list)
+    for row in rows:
+        key = condition_key(row)
         groups[key].append(row)
 
     summary: list[dict[str, str]] = []
-    for (instance, variant, policy, threshold, metric), items in sorted(groups.items()):
+    for key, items in sorted(groups.items()):
+        instance, variant, policy, threshold, metric = key[:5]
         bks = BKS.get(instance)
         best_values = [int(float(item["best_length"])) for item in items]
         elapsed = [float(item["elapsed_ms"]) for item in items]
@@ -84,6 +186,10 @@ def group_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
         best_mean = mean([float(v) for v in best_values])
         gap_min = ((best_min - bks) / bks * 100.0) if bks else 0.0
         gap_mean = ((best_mean - bks) / bks * 100.0) if bks else 0.0
+        contract_values = {
+            field: key[5 + offset]
+            for offset, field in enumerate(SUMMARY_CONTRACT_FIELDS)
+        }
         summary.append({
             "instance": instance,
             "qlsa_variant": variant,
@@ -91,9 +197,7 @@ def group_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
             "diversity_threshold": threshold,
             "diversity_metric": metric,
             "runs": str(len(items)),
-            "iterations": items[0].get("iterations", ""),
-            "chains": items[0].get("chains", ""),
-            "threads": items[0].get("threads", ""),
+            **contract_values,
             "bks": str(bks or ""),
             "best_length_min": str(best_min),
             "best_length_mean": f"{best_mean:.4f}",
@@ -116,9 +220,7 @@ def write_summary(path: Path, rows: list[dict[str, str]]) -> None:
         "diversity_threshold",
         "diversity_metric",
         "runs",
-        "iterations",
-        "chains",
-        "threads",
+        *SUMMARY_CONTRACT_FIELDS,
         "bks",
         "best_length_min",
         "best_length_mean",
@@ -164,9 +266,9 @@ def write_markdown(path: Path, rows: list[dict[str, str]]) -> None:
         "",
         "本实验比较 `current`、`paper` 与 `paper-sb` 三种 QLSA 入口。`current` 是已有工程化状态/动作版本，`paper` 使用 candidate-leader 来源选择，`paper-sb` 在 candidate-leader 上加入路径多样性状态。",
         "",
-        "历史 raw CSV 没有 diversity metric 列时，`paper-sb` 行按当时实现明确标为 `hamming`；新的 `edge` 样本会作为独立条件汇总，不能与 Hamming 合并。",
+        "历史 raw CSV 没有 diversity metric 列时，`paper-sb` 行按当时实现标为 `hamming`；`edge` 样本以独立条件汇总。",
         "",
-        "实验目的不是替换已有 Step 5/6 结果，而是确认论文机制对齐变体已经进入同一 C++/OpenMP 实验流程，并观察其在代表实例上的质量和时间代价。",
+        "三种变体使用统一的 C++/OpenMP 执行合同和共同种子，表中结果展示参数网格内达到的质量和时间代价。",
         "",
         "## 各变体与度量条件的最佳配置",
         "",

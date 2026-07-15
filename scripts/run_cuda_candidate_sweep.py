@@ -15,24 +15,27 @@ import subprocess
 import sys
 from pathlib import Path
 
+try:
+    from scripts.experiment_csv import (
+        CURRENT_HEADER,
+        ExperimentCsvError,
+        parse_program_rows,
+        resolve_executable,
+        row_for_output,
+        validate_command_output,
+    )
+except ModuleNotFoundError:  # Direct ``python scripts/...`` invocation.
+    from experiment_csv import (  # type: ignore[no-redef]
+        CURRENT_HEADER,
+        ExperimentCsvError,
+        parse_program_rows,
+        resolve_executable,
+        row_for_output,
+        validate_command_output,
+    )
 
 ROOT = Path(__file__).resolve().parents[1]
-PROGRAM_HEADER = [
-    "algorithm",
-    "instance",
-    "dimension",
-    "iterations",
-    "seed",
-    "init",
-    "chains",
-    "threads",
-    "parallel",
-    "best_length",
-    "final_length",
-    "elapsed_ms",
-    "accepted_moves",
-    "improved_moves",
-]
+PROGRAM_HEADER = CURRENT_HEADER
 EXTRA_HEADER = [
     "cuda_mode",
     "cuda_block_size",
@@ -43,7 +46,7 @@ EXTRA_HEADER = [
 ]
 
 
-def find_executable() -> Path:
+def find_executable(explicit: Path | None = None) -> Path:
     candidates = [
         ROOT / "build-cuda-ninja" / "tsp_sa.exe",
         ROOT / "build-cuda-ninja" / "tsp_sa",
@@ -51,10 +54,12 @@ def find_executable() -> Path:
         ROOT / "build" / "Release" / "tsp_sa.exe",
         ROOT / "build" / "tsp_sa",
     ]
-    for path in candidates:
-        if path.exists():
-            return path
-    raise FileNotFoundError("Could not find tsp_sa executable; build the CUDA target first.")
+    return resolve_executable(
+        explicit,
+        candidates,
+        root=ROOT,
+        description="CUDA-enabled tsp_sa executable",
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -71,20 +76,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--input-dir", default=str(ROOT / "data"))
     parser.add_argument("--output", default=str(ROOT / "results" / "raw" / "cuda_candidate_sweep_raw.csv"))
+    parser.add_argument("--executable", type=Path, help="Explicit tsp_sa executable path.")
     parser.add_argument("--timeout", type=int, default=600)
     return parser.parse_args()
 
 
 def rows_from_stdout(stdout: str) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line or line.startswith("CSV:"):
-            continue
-        parts = next(csv.reader([line]))
-        if len(parts) == len(PROGRAM_HEADER) and (parts[0].startswith("sa-cuda-") or parts[0].startswith("qlsa-cuda-")):
-            rows.append(dict(zip(PROGRAM_HEADER, parts)))
-    return rows
+    return parse_program_rows(
+        stdout,
+        algorithm_predicate=lambda algorithm: algorithm.startswith(("sa-cuda-", "qlsa-cuda-")),
+    )
 
 
 def run_candidate(
@@ -159,6 +160,10 @@ def run_candidate(
         print(completed.stderr, file=sys.stderr)
         raise RuntimeError(f"command failed with exit code {completed.returncode}; see {log_file}")
     rows = rows_from_stdout(completed.stdout)
+    try:
+        validate_command_output(rows, command, source=f"{input_path.name} {algorithm} candidate")
+    except ExperimentCsvError as exc:
+        raise ExperimentCsvError(f"{exc}; see {log_file}") from exc
     for row in rows:
         row["cuda_mode"] = "candidate"
         row["cuda_block_size"] = str(block_size)
@@ -171,7 +176,7 @@ def run_candidate(
 
 def main() -> int:
     args = parse_args()
-    exe = find_executable()
+    exe = find_executable(args.executable)
     input_dir = Path(args.input_dir)
     if not input_dir.is_absolute():
         input_dir = ROOT / input_dir
@@ -186,8 +191,7 @@ def main() -> int:
     for instance in args.instances:
         input_path = input_dir / f"{instance}.tsp"
         if not input_path.exists():
-            print(f"[warning] missing instance, skipped: {input_path}")
-            continue
+            raise FileNotFoundError(f"missing requested instance: {input_path}")
         for block_size in args.block_sizes:
             for candidates in args.candidates_per_iter:
                 if candidates <= 0 or block_size <= 0:
@@ -204,10 +208,12 @@ def main() -> int:
                                 reversal_mode, candidate_policy, algorithm, args, log_dir
                             ))
 
+    if not rows:
+        raise ExperimentCsvError("no experiment rows were produced")
     with output.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=PROGRAM_HEADER + EXTRA_HEADER)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(row_for_output(row, PROGRAM_HEADER + EXTRA_HEADER) for row in rows)
     print(f"[ok] wrote {len(rows)} rows to {output.relative_to(ROOT)}")
     return 0
 

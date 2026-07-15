@@ -8,6 +8,7 @@ the rows as fallback.
 
 import csv
 import argparse
+import io
 import shutil
 import subprocess
 import sys
@@ -15,8 +16,26 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional
 
+try:
+    from scripts.experiment_csv import parse_program_rows, validate_command_output
+    from scripts.mpi_csv import (
+        MPI_SCHEMA_WIDTH,
+        MpiExecutionContract,
+        parse_mpi_program_rows,
+        validate_mpi_execution_contract,
+    )
+except ModuleNotFoundError:  # Direct ``python scripts/...`` invocation.
+    from experiment_csv import parse_program_rows, validate_command_output  # type: ignore[no-redef]
+    from mpi_csv import (  # type: ignore[no-redef]
+        MPI_SCHEMA_WIDTH,
+        MpiExecutionContract,
+        parse_mpi_program_rows,
+        validate_mpi_execution_contract,
+    )
+
 
 ROOT = Path(__file__).resolve().parents[1]
+TSP_CLI_SCHEMA_WIDTHS = {14, 22, 27, 28}
 CSV_HEADER = [
     "mode",
     "algorithm",
@@ -35,6 +54,9 @@ CSV_HEADER = [
     "improved_moves",
     "mpi_ranks",
     "communication_ms",
+    "actual_threads",
+    "iterations_completed",
+    "deadline_reached",
     "fallback",
     "speedup_vs_openmp",
     "scaling_efficiency",
@@ -61,6 +83,10 @@ def find_executable(candidates: List[Path]) -> Optional[Path]:
 def find_tsp_sa() -> Optional[Path]:
     return find_executable(
         [
+            ROOT / "build" / "ninja-cpu-release" / "tsp_sa.exe",
+            ROOT / "build" / "ninja-cpu-release" / "tsp_sa",
+            ROOT / "build" / "ninja-cuda-release" / "tsp_sa.exe",
+            ROOT / "build" / "ninja-cuda-release" / "tsp_sa",
             ROOT / "build-cuda-ninja" / "tsp_sa.exe",
             ROOT / "build-cuda-ninja" / "tsp_sa",
             ROOT / "build-cuda-real" / "Release" / "tsp_sa.exe",
@@ -73,12 +99,23 @@ def find_tsp_sa() -> Optional[Path]:
 def find_tsp_sa_mpi() -> Optional[Path]:
     return find_executable(
         [
+            ROOT / "build" / "ninja-mpi-release" / "tsp_sa_mpi.exe",
+            ROOT / "build" / "ninja-mpi-release" / "tsp_sa_mpi",
             ROOT / "build-cuda-ninja" / "tsp_sa_mpi.exe",
             ROOT / "build-cuda-ninja" / "tsp_sa_mpi",
             ROOT / "build" / "Release" / "tsp_sa_mpi.exe",
             ROOT / "build" / "tsp_sa_mpi",
         ]
     )
+
+
+def resolve_mpi_executable(explicit: Optional[Path]) -> Optional[Path]:
+    if explicit is None:
+        return find_tsp_sa_mpi()
+    path = explicit if explicit.is_absolute() else ROOT / explicit
+    if not path.is_file():
+        raise FileNotFoundError(f"explicit tsp_sa_mpi executable not found: {path}")
+    return path.resolve()
 
 
 def find_mpi_launcher() -> Optional[str]:
@@ -95,19 +132,6 @@ def mpi_runtime_args() -> List[str]:
     if not prefix.exists():
         return []
     return ["--prefix", str(prefix), "--mca", "pmix_base_compress", "0"]
-
-
-def data_line(stdout: str) -> List[str]:
-    for line in stdout.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("CSV:"):
-            continue
-        if "," not in stripped:
-            continue
-        first = stripped.split(",", 1)[0]
-        if first.startswith("sa") or first.startswith("qlsa"):
-            return next(csv.reader([stripped]))
-    raise RuntimeError("no CSV data row found in command stdout")
 
 
 def data_lines(stdout: str) -> List[List[str]]:
@@ -148,7 +172,10 @@ def run_command(command: List[str], log_path: Path) -> List[str]:
     )
     if completed.returncode != 0:
         raise RuntimeError(f"command failed with exit code {completed.returncode}; see {log_path}")
-    return data_line(completed.stdout)
+    rows = data_lines(completed.stdout)
+    if len(rows) != 1:
+        raise RuntimeError(f"expected one CSV data row, got {len(rows)}; see {log_path}")
+    return rows[0]
 
 
 def run_command_rows(command: List[str], log_path: Path) -> List[List[str]]:
@@ -306,6 +333,54 @@ def mpi_hostfile_command(launcher: str,
     return cmd
 
 
+def mpi_extension(raw: List[str]) -> tuple[int, float]:
+    if len(raw) != MPI_SCHEMA_WIDTH or raw[8] != "mpi-omp":
+        raise RuntimeError(
+            f"expected a {MPI_SCHEMA_WIDTH}-column mpi-omp CSV row, got {raw}"
+        )
+    if raw[0] not in {"sa-mpi-omp", "qlsa-mpi-omp"}:
+        raise RuntimeError(f"unexpected MPI algorithm label: {raw[0]!r}")
+    return int(raw[14]), float(raw[15])
+
+
+def csv_text(rows: List[List[str]]) -> str:
+    stream = io.StringIO()
+    writer = csv.writer(stream, lineterminator="\n")
+    writer.writerows(rows)
+    return stream.getvalue()
+
+
+def validate_openmp_raw(raw: List[str], command: List[str], source: str) -> None:
+    rows = parse_program_rows(csv_text([raw]))
+    validate_command_output(rows, command, source=source)
+
+
+def validate_mpi_raw_rows(
+    raw_rows: List[List[str]],
+    case: Case,
+    ranks: int,
+    repeat: int,
+    source: str,
+) -> None:
+    rows = parse_mpi_program_rows(
+        csv_text(raw_rows), algorithm="qlsa" if case.qlsa else "sa"
+    )
+    validate_mpi_execution_contract(
+        rows,
+        MpiExecutionContract(
+            algorithm="qlsa" if case.qlsa else "sa",
+            iterations=case.iterations,
+            chains=case.chains,
+            threads=case.threads,
+            ranks=ranks,
+            repeat=repeat,
+            seed=case.seed,
+            init="nn",
+        ),
+        source=source,
+    )
+
+
 def normalize_row(
     raw: List[str],
     mode: str,
@@ -319,9 +394,20 @@ def normalize_row(
         raise RuntimeError(f"unexpected CSV row with {len(raw)} columns: {raw}")
     ranks = mpi_ranks
     comm = communication_ms
-    if len(raw) >= 16:
-        ranks = int(raw[14])
-        comm = float(raw[15])
+    if raw[8] == "mpi-omp":
+        ranks, comm = mpi_extension(raw)
+        actual_threads = raw[16]
+        iterations_completed = raw[17]
+        deadline_reached = raw[18]
+    elif len(raw) not in TSP_CLI_SCHEMA_WIDTHS:
+        raise RuntimeError(
+            f"non-MPI tsp_sa CSV row must have one of {sorted(TSP_CLI_SCHEMA_WIDTHS)} columns, "
+            f"got {len(raw)}: {raw}"
+        )
+    else:
+        actual_threads = raw[27] if len(raw) == 28 else ""
+        iterations_completed = raw[20] if len(raw) >= 22 else ""
+        deadline_reached = raw[21] if len(raw) >= 22 else ""
     return {
         "mode": mode,
         "algorithm": raw[0],
@@ -340,6 +426,9 @@ def normalize_row(
         "improved_moves": raw[13],
         "mpi_ranks": str(ranks),
         "communication_ms": f"{comm:.3f}",
+        "actual_threads": actual_threads,
+        "iterations_completed": iterations_completed,
+        "deadline_reached": deadline_reached,
         "fallback": "true" if fallback else "false",
         "speedup_vs_openmp": "" if speedup is None else f"{speedup:.4f}",
         "scaling_efficiency": "" if efficiency is None else f"{efficiency:.4f}",
@@ -397,7 +486,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--chains", type=int, default=None)
     parser.add_argument("--threads", type=int, default=None)
     parser.add_argument("--repeat", type=int, default=1)
-    parser.add_argument("--executable", type=Path, default=None, help="Path to tsp_sa_mpi for hostfile mode.")
+    parser.add_argument("--executable", type=Path, default=None, help="Explicit path to tsp_sa_mpi.")
     parser.add_argument("--no-qlsa", action="store_true", help="Run SA only.")
     return parser.parse_args()
 
@@ -437,9 +526,13 @@ def run_hostfile_mode(args: argparse.Namespace) -> int:
     if launcher is None:
         print("Error: mpirun/mpiexec not found; real MPI smoke cannot run", file=sys.stderr)
         return 1
-    mpi_exe = args.executable or (ROOT / "build-mpi" / "tsp_sa_mpi")
-    if not mpi_exe.exists():
-        print(f"Error: tsp_sa_mpi not found: {mpi_exe}", file=sys.stderr)
+    try:
+        mpi_exe = resolve_mpi_executable(args.executable)
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if mpi_exe is None:
+        print("Error: tsp_sa_mpi not found in known build directories", file=sys.stderr)
         return 1
 
     logs_dir = ROOT / "results" / "logs" / "mpi_vm_smoke"
@@ -461,14 +554,22 @@ def run_hostfile_mode(args: argparse.Namespace) -> int:
                 mpi_hostfile_command(launcher, mpi_exe, case, args.np, args.hostfile, args.repeat),
                 log_path,
             )
+            validate_mpi_raw_rows(
+                raw_rows,
+                case,
+                args.np,
+                args.repeat,
+                f"{case.instance_name} hostfile smoke; see {log_path}",
+            )
             for raw in raw_rows:
+                ranks, communication_ms = mpi_extension(raw)
                 rows.append(
                     normalize_row(
                         raw,
                         mode="mpi-vm-smoke",
                         fallback=False,
-                        mpi_ranks=args.np,
-                        communication_ms=float(raw[15]) if len(raw) >= 16 else 0.0,
+                        mpi_ranks=ranks,
+                        communication_ms=communication_ms,
                         speedup=None,
                         efficiency=None,
                     )
@@ -500,7 +601,11 @@ def main() -> int:
         print("Error: tsp_sa executable not found. Build the project first.", file=sys.stderr)
         return 1
 
-    mpi_exe = find_tsp_sa_mpi()
+    try:
+        mpi_exe = resolve_mpi_executable(args.executable)
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
     launcher = find_mpi_launcher()
     mpi_available = mpi_exe is not None and launcher is not None
     mpi_reason = "tsp_sa_mpi and MPI launcher found"
@@ -524,7 +629,9 @@ def main() -> int:
     for idx, case in enumerate(cases, start=1):
         algo_suffix = "qlsa" if case.qlsa else "sa"
         base_log = logs_dir / f"{idx:02d}_{case.instance_name}_{algo_suffix}_openmp.log"
-        openmp_raw = run_command(openmp_command(openmp_exe, case), base_log)
+        openmp_cmd = openmp_command(openmp_exe, case)
+        openmp_raw = run_command(openmp_cmd, base_log)
+        validate_openmp_raw(openmp_raw, openmp_cmd, f"{case.instance_name} OpenMP smoke")
         openmp_elapsed = float(openmp_raw[11])
         rows.append(
             normalize_row(
@@ -541,9 +648,13 @@ def main() -> int:
         if mpi_available:
             mpi_log = logs_dir / f"{idx:02d}_{case.instance_name}_{algo_suffix}_mpi.log"
             assert launcher is not None and mpi_exe is not None
-            mpi_raw = run_command(mpi_command(launcher, mpi_exe, case, ranks=2), mpi_log)
+            mpi_cmd = mpi_command(launcher, mpi_exe, case, ranks=2)
+            mpi_raw = run_command(mpi_cmd, mpi_log)
+            validate_mpi_raw_rows(
+                [mpi_raw], case, 2, 1, f"{case.instance_name} local MPI smoke"
+            )
             mpi_elapsed = float(mpi_raw[11])
-            ranks = int(mpi_raw[14]) if len(mpi_raw) >= 16 else 2
+            ranks, communication_ms = mpi_extension(mpi_raw)
             speedup = openmp_elapsed / mpi_elapsed if mpi_elapsed > 0.0 else None
             efficiency = (speedup / ranks) if speedup is not None and ranks > 0 else None
             rows.append(
@@ -552,7 +663,7 @@ def main() -> int:
                     mode="mpi",
                     fallback=False,
                     mpi_ranks=ranks,
-                    communication_ms=float(mpi_raw[15]) if len(mpi_raw) >= 16 else 0.0,
+                    communication_ms=communication_ms,
                     speedup=speedup,
                     efficiency=efficiency,
                 )

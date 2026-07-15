@@ -7,23 +7,26 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
+try:
+    from scripts.experiment_csv import (
+        CURRENT_HEADER,
+        ExperimentCsvError,
+        parse_program_rows,
+        resolve_executable,
+        row_for_output,
+        validate_command_output,
+    )
+except ModuleNotFoundError:  # Direct ``python scripts/...`` invocation.
+    from experiment_csv import (  # type: ignore[no-redef]
+        CURRENT_HEADER,
+        ExperimentCsvError,
+        parse_program_rows,
+        resolve_executable,
+        row_for_output,
+        validate_command_output,
+    )
 
-CSV_HEADER = [
-    "algorithm",
-    "instance",
-    "dimension",
-    "iterations",
-    "seed",
-    "init",
-    "chains",
-    "threads",
-    "parallel",
-    "best_length",
-    "final_length",
-    "elapsed_ms",
-    "accepted_moves",
-    "improved_moves",
-]
+CSV_HEADER = CURRENT_HEADER
 
 ALGORITHMS = {"sa-omp", "qlsa-omp"}
 BKS = {
@@ -49,21 +52,19 @@ def parse_args():
     parser.add_argument("--raw-output", default="results/openmp_scaling_grid_raw.csv")
     parser.add_argument("--summary-output", default="results/openmp_scaling_grid_summary.csv")
     parser.add_argument("--markdown", default="docs/step6A_openmp_scaling_analysis.md")
+    parser.add_argument("--executable", type=Path, help="Explicit tsp_sa executable path.")
     parser.add_argument("--quick", action="store_true")
     return parser.parse_args()
 
 
-def find_executable(root):
+def find_executable(root, explicit=None):
     candidates = [
         root / "build-cuda-ninja" / "tsp_sa.exe",
         root / "build-cuda-ninja" / "tsp_sa",
         root / "build" / "Release" / "tsp_sa.exe",
         root / "build" / "tsp_sa",
     ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    raise SystemExit("Could not find tsp_sa executable.")
+    return resolve_executable(explicit, candidates, root=root, description="tsp_sa executable")
 
 
 def safe_name(text):
@@ -74,18 +75,7 @@ def safe_name(text):
 
 
 def extract_csv_rows(stdout):
-    rows = []
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            parsed = next(csv.reader([line]))
-        except csv.Error:
-            continue
-        if len(parsed) == len(CSV_HEADER) and parsed[0] in ALGORITHMS:
-            rows.append(dict(zip(CSV_HEADER, parsed)))
-    return rows
+    return parse_program_rows(stdout, algorithm_predicate=lambda algorithm: algorithm in ALGORITHMS)
 
 
 def write_log(log_dir, label, command, completed):
@@ -119,8 +109,10 @@ def run_command(command, log_dir, label):
     if completed.returncode != 0:
         raise SystemExit(f"Command failed with exit code {completed.returncode}; see {log_path}")
     rows = extract_csv_rows(completed.stdout)
-    if not rows:
-        raise SystemExit(f"No CSV rows found in command output; see {log_path}")
+    try:
+        validate_command_output(rows, command, source=label)
+    except ExperimentCsvError as exc:
+        raise SystemExit(f"{exc}; see {log_path}") from exc
     return rows
 
 
@@ -167,7 +159,7 @@ def write_raw(path, rows):
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_HEADER)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(row_for_output(row, CSV_HEADER) for row in rows)
 
 
 def mean(values):
@@ -326,7 +318,7 @@ def main():
         args.threads = [1, 2]
 
     root = Path.cwd()
-    exe = find_executable(root)
+    exe = find_executable(root, args.executable)
     input_dir = Path(args.input_dir)
     log_dir = Path("results") / "logs" / "openmp_scaling_grid"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -335,8 +327,7 @@ def main():
     for instance in args.instances:
         input_path = input_dir / f"{instance}.tsp"
         if not input_path.exists():
-            print(f"[warning] missing {input_path}; skipping {instance}", flush=True)
-            continue
+            raise FileNotFoundError(f"missing requested instance: {input_path}")
         for chains in args.chains:
             for threads in args.threads:
                 for qlsa in (False, True):
@@ -344,6 +335,8 @@ def main():
                     label = f"{instance}_{'qlsa' if qlsa else 'sa'}_c{chains}_t{threads}"
                     rows.extend(run_command(command, log_dir, label))
 
+    if not rows:
+        raise ExperimentCsvError("no experiment rows were produced")
     raw_path = Path(args.raw_output)
     summary_path = Path(args.summary_output)
     markdown_path = Path(args.markdown)

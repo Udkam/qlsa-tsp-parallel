@@ -5,7 +5,13 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
+
+try:
+    from scripts.report_figure_manifest import validate_manifest
+except ModuleNotFoundError:  # Direct ``python scripts/...`` invocation.
+    from report_figure_manifest import validate_manifest  # type: ignore[no-redef]
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,6 +19,7 @@ COURSE_REPORT = ROOT / "docs" / "final" / "report.md"
 PERSONAL_REPORT = ROOT / "docs" / "final" / "personal_report.md"
 MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 HTML_IMAGE_RE = re.compile(r"<img\s+[^>]*src=[\"']([^\"']+)[\"'][^>]*>", re.IGNORECASE)
+INDEX_PATH_RE = re.compile(r"`((?:results|figures)/[^`]+)`")
 
 REQUIRED_RESULTS = [
     ROOT / "results" / "summary" / "step5_multi_cpu_summary.csv",
@@ -27,6 +34,7 @@ REQUIRED_RESULTS = [
     ROOT / "results" / "final" / "fair_island_clean_run_provenance.csv",
     ROOT / "results" / "reference" / "paper_hard_instance_quality.csv",
     ROOT / "results" / "final" / "RESULTS_INDEX.md",
+    ROOT / "results" / "final" / "cuda_candidate_a280_nsight_summary.md",
 ]
 
 FORBIDDEN = [
@@ -73,6 +81,36 @@ def check_text(path: Path) -> list[str]:
     return errors
 
 
+def check_results_index() -> list[str]:
+    errors: list[str] = []
+    index = ROOT / "results" / "final" / "RESULTS_INDEX.md"
+    if not index.is_file():
+        return [f"missing result file: {index.relative_to(ROOT)}"]
+    git_probe = subprocess.run(
+        ["git", "-C", str(ROOT), "rev-parse", "--is-inside-work-tree"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    check_tracked = git_probe.returncode == 0
+    referenced = sorted(set(INDEX_PATH_RE.findall(index.read_text(encoding="utf-8"))))
+    for relative in referenced:
+        path = ROOT / relative
+        if not path.is_file():
+            errors.append(f"results index references missing file: {relative}")
+            continue
+        if check_tracked:
+            completed = subprocess.run(
+                ["git", "-C", str(ROOT), "ls-files", "--error-unmatch", "--", relative],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            if completed.returncode != 0:
+                errors.append(f"results index references untracked file: {relative}")
+    return errors
+
+
 def main() -> int:
     errors: list[str] = []
 
@@ -88,6 +126,9 @@ def main() -> int:
     for path in REQUIRED_RESULTS:
         if not path.exists():
             errors.append(f"missing result file: {path.relative_to(ROOT)}")
+
+    errors.extend(validate_manifest())
+    errors.extend(check_results_index())
 
     if errors:
         for error in errors:

@@ -15,6 +15,7 @@ option(TSP_REQUIRE_CUDA "Fail configuration when requested CUDA support is unava
 # default, but gracefully disabled when MPI is not installed, so it never affects
 # the default OpenMP/CUDA build.
 option(TSP_ENABLE_MPI "Enable MPI backend" ON)
+option(TSP_REQUIRE_MPI "Fail configuration when requested MPI support is unavailable" OFF)
 
 # CMake 3.24 introduced the `native` CUDA architecture value. It avoids baking
 # the former fixed sm_70 target into every local build. For a distributable or
@@ -130,13 +131,28 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_L
     list(APPEND TSP_EXTRA_LINK_LIBS stdc++fs)
 endif()
 
+if(TSP_REQUIRE_MPI AND NOT TSP_ENABLE_MPI)
+    message(FATAL_ERROR "TSP_REQUIRE_MPI=ON requires TSP_ENABLE_MPI=ON.")
+endif()
+
 if(TSP_ENABLE_MPI)
     find_package(MPI QUIET)
     if(MPI_CXX_FOUND)
         message(STATUS "MPI enabled")
+        if(TSP_REQUIRE_MPI AND NOT (TSP_ENABLE_OPENMP AND OpenMP_CXX_FOUND))
+            message(FATAL_ERROR
+                "TSP_REQUIRE_MPI=ON requires a usable OpenMP C++ runtime because "
+                "the distributed executable implements the MPI + OpenMP hybrid backend.")
+        endif()
+    elseif(TSP_REQUIRE_MPI)
+        message(FATAL_ERROR
+            "TSP_REQUIRE_MPI=ON, but no usable MPI C++ toolchain was found. "
+            "Install/configure MPI or configure with -DTSP_REQUIRE_MPI=OFF.")
     else()
         message(STATUS "TSP_ENABLE_MPI=ON but MPI was not found; hybrid backend disabled gracefully")
     endif()
+else()
+    message(STATUS "MPI disabled (TSP_ENABLE_MPI=OFF)")
 endif()
 
 add_executable(tsp_sa src/main.cpp)
@@ -152,23 +168,27 @@ else()
     target_compile_options(tsp_sa PRIVATE $<$<CONFIG:Release>:-O3 -march=native -DNDEBUG>)
 endif()
 
-if(TSP_ENABLE_MPI AND MPI_CXX_FOUND)
+if(TSP_ENABLE_MPI AND MPI_CXX_FOUND AND TSP_ENABLE_OPENMP AND OpenMP_CXX_FOUND)
     add_executable(tsp_sa_mpi
         src/mpi_main.cpp
         src/mpi_parallel.cpp
     )
-    target_link_libraries(tsp_sa_mpi PRIVATE tsp_core MPI::MPI_CXX ${TSP_EXTRA_LINK_LIBS})
+    target_link_libraries(tsp_sa_mpi PRIVATE
+        tsp_core
+        MPI::MPI_CXX
+        OpenMP::OpenMP_CXX
+        ${TSP_EXTRA_LINK_LIBS}
+    )
     target_compile_definitions(tsp_sa_mpi PRIVATE TSP_HAS_MPI=1)
-
-    if(TSP_ENABLE_OPENMP AND OpenMP_CXX_FOUND)
-        target_link_libraries(tsp_sa_mpi PRIVATE OpenMP::OpenMP_CXX)
-    endif()
 
     if(MSVC)
         target_compile_options(tsp_sa_mpi PRIVATE $<$<CONFIG:Release>:/O2 /DNDEBUG>)
     else()
         target_compile_options(tsp_sa_mpi PRIVATE $<$<CONFIG:Release>:-O3 -march=native -DNDEBUG>)
     endif()
+elseif(TSP_ENABLE_MPI AND MPI_CXX_FOUND)
+    message(STATUS
+        "MPI C++ was found, but the mpi-omp executable requires OpenMP; hybrid backend disabled")
 endif()
 
 enable_testing()

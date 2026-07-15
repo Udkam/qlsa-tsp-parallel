@@ -10,13 +10,28 @@ import json
 import subprocess
 from pathlib import Path
 
+try:
+    from scripts.experiment_csv import (
+        CURRENT_HEADER,
+        ExperimentCsvError,
+        parse_program_rows,
+        resolve_executable,
+        row_for_output,
+        validate_command_output,
+    )
+except ModuleNotFoundError:  # Direct ``python scripts/...`` invocation.
+    from experiment_csv import (  # type: ignore[no-redef]
+        CURRENT_HEADER,
+        ExperimentCsvError,
+        parse_program_rows,
+        resolve_executable,
+        row_for_output,
+        validate_command_output,
+    )
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "configs" / "large_tsplib_instances.json"
-PROGRAM_HEADER = [
-    "algorithm", "instance", "dimension", "iterations", "seed", "init", "chains", "threads",
-    "parallel", "best_length", "final_length", "elapsed_ms", "accepted_moves", "improved_moves",
-]
+PROGRAM_HEADER = CURRENT_HEADER
 EXTRA_HEADER = ["tier", "cuda_mode", "cuda_block_size", "cuda_candidates_per_iter", "status", "log_file", "error"]
 
 
@@ -32,20 +47,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--input-dir", default=str(ROOT / "data"))
     parser.add_argument("--output", default=str(ROOT / "results" / "raw" / "large_cuda_raw.csv"))
+    parser.add_argument("--executable", type=Path, help="Explicit CUDA-enabled tsp_sa executable path.")
     parser.add_argument("--timeout", type=int, default=0)
     parser.add_argument("--quick", action="store_true")
     return parser.parse_args()
 
 
-def find_executable() -> Path:
-    for candidate in [
+def find_executable(explicit: Path | None = None) -> Path:
+    return resolve_executable(
+        explicit,
+        [
         ROOT / "build-cuda-ninja" / "tsp_sa.exe",
         ROOT / "build-cuda-ninja" / "tsp_sa",
         ROOT / "build-cuda-real" / "Release" / "tsp_sa.exe",
-    ]:
-        if candidate.exists():
-            return candidate
-    raise FileNotFoundError("Could not find CUDA-enabled tsp_sa executable")
+        ],
+        root=ROOT,
+        description="CUDA-enabled tsp_sa executable",
+    )
 
 
 def load_config() -> dict:
@@ -74,37 +92,7 @@ def selected_instances(args: argparse.Namespace, config: dict) -> list[str]:
 
 
 def parse_rows(stdout: str) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line or line.startswith("CSV:"):
-            continue
-        try:
-            parsed = next(csv.reader([line]))
-        except csv.Error:
-            continue
-        if len(parsed) == len(PROGRAM_HEADER) and parsed[0].startswith("sa-cuda-"):
-            rows.append(dict(zip(PROGRAM_HEADER, parsed)))
-    return rows
-
-
-def error_row(instance: str, tier: str, mode: str, args: argparse.Namespace, status: str, error: str, log_file: Path | None) -> dict[str, str]:
-    row = {key: "" for key in PROGRAM_HEADER + EXTRA_HEADER}
-    row.update({
-        "instance": instance,
-        "iterations": str(args.iterations),
-        "chains": str(args.chains),
-        "threads": str(args.block_size),
-        "parallel": "cuda",
-        "tier": tier,
-        "cuda_mode": mode,
-        "cuda_block_size": str(args.block_size),
-        "cuda_candidates_per_iter": str(args.candidates_per_iter),
-        "status": status,
-        "error": error,
-        "log_file": str(log_file.relative_to(ROOT)) if log_file else "",
-    })
-    return row
+    return parse_program_rows(stdout, algorithm_predicate=lambda algorithm: algorithm.startswith("sa-cuda-"))
 
 
 def display_path(path: Path) -> str:
@@ -132,15 +120,24 @@ def run_one(exe: Path, input_path: Path, tier: str, mode: str, args: argparse.Na
         )
     except subprocess.TimeoutExpired as exc:
         log_file.write_text("$ " + " ".join(command) + "\n\n[timeout]\n" + str(exc), encoding="utf-8")
-        return [error_row(input_path.stem, tier, mode, args, "timeout", str(exc), log_file)]
+        raise ExperimentCsvError(
+            f"{input_path.name} {mode}: command timed out; see {log_file.relative_to(ROOT)}"
+        ) from exc
     log_file.write_text(
         "$ " + " ".join(command) + f"\n\nreturncode={completed.returncode}\n\n[stdout]\n"
         + completed.stdout + "\n[stderr]\n" + completed.stderr,
         encoding="utf-8",
     )
     if completed.returncode != 0:
-        return [error_row(input_path.stem, tier, mode, args, "failed", f"returncode={completed.returncode}", log_file)]
+        raise ExperimentCsvError(
+            f"{input_path.name} {mode}: command failed with return code {completed.returncode}; "
+            f"see {log_file.relative_to(ROOT)}"
+        )
     rows = parse_rows(completed.stdout)
+    try:
+        validate_command_output(rows, command, source=f"{input_path.name} {mode}")
+    except ExperimentCsvError as exc:
+        raise ExperimentCsvError(f"{exc}; see {log_file.relative_to(ROOT)}") from exc
     for row in rows:
         row["tier"] = tier
         row["cuda_mode"] = mode
@@ -149,8 +146,6 @@ def run_one(exe: Path, input_path: Path, tier: str, mode: str, args: argparse.Na
         row["status"] = "ok"
         row["log_file"] = str(log_file.relative_to(ROOT))
         row["error"] = ""
-    if not rows:
-        return [error_row(input_path.stem, tier, mode, args, "no_csv", "no CSV rows in stdout", log_file)]
     return rows
 
 
@@ -161,7 +156,7 @@ def main() -> int:
     config = load_config()
     tmap = tier_map(config)
     instances = selected_instances(args, config)
-    exe = find_executable()
+    exe = find_executable(args.executable)
     input_dir = Path(args.input_dir)
     if not input_dir.is_absolute():
         input_dir = ROOT / input_dir
@@ -179,17 +174,16 @@ def main() -> int:
         tier = tmap.get(instance, "custom")
         input_path = input_dir / f"{instance}.tsp"
         if not input_path.exists():
-            missing = display_path(input_path)
-            print(f"[warning] missing {missing}; skipped", flush=True)
-            rows.append(error_row(instance, tier, "", args, "missing", f"missing {missing}", None))
-            continue
+            raise FileNotFoundError(f"missing requested instance: {display_path(input_path)}")
         rows.extend(run_one(exe, input_path, tier, "chain", args, log_dir))
         rows.extend(run_one(exe, input_path, tier, "candidate", args, log_dir))
 
+    if not rows:
+        raise ExperimentCsvError("no experiment rows were produced")
     with output.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=PROGRAM_HEADER + EXTRA_HEADER)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(row_for_output(row, PROGRAM_HEADER + EXTRA_HEADER) for row in rows)
     print(f"[ok] wrote {len(rows)} rows to {output.relative_to(ROOT)}")
     return 0
 

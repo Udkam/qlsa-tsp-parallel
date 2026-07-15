@@ -6,23 +6,26 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+try:
+    from scripts.experiment_csv import (
+        CURRENT_HEADER,
+        ExperimentCsvError,
+        parse_program_rows,
+        resolve_executable,
+        row_for_output,
+        validate_command_output,
+    )
+except ModuleNotFoundError:  # Direct ``python scripts/...`` invocation.
+    from experiment_csv import (  # type: ignore[no-redef]
+        CURRENT_HEADER,
+        ExperimentCsvError,
+        parse_program_rows,
+        resolve_executable,
+        row_for_output,
+        validate_command_output,
+    )
 
-BASE_FIELDS = [
-    "algorithm",
-    "instance",
-    "dimension",
-    "iterations",
-    "seed",
-    "init",
-    "chains",
-    "threads",
-    "parallel",
-    "best_length",
-    "final_length",
-    "elapsed_ms",
-    "accepted_moves",
-    "improved_moves",
-]
+BASE_FIELDS = CURRENT_HEADER
 
 META_FIELDS = [
     "config_name",
@@ -57,23 +60,19 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=201)
     parser.add_argument("--output", default="results/targeted_quality_raw.csv")
     parser.add_argument("--input-dir", default="data")
+    parser.add_argument("--executable", type=Path, help="Explicit tsp_sa executable path.")
     parser.add_argument("--quick", action="store_true")
     return parser.parse_args()
 
 
-def find_executable(root):
+def find_executable(root, explicit=None):
     candidates = [
         root / "build-cuda-ninja" / "tsp_sa.exe",
         root / "build-cuda-ninja" / "tsp_sa",
         root / "build" / "Release" / "tsp_sa.exe",
         root / "build" / "tsp_sa",
     ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    lines = ["Could not find tsp_sa executable. Tried:"]
-    lines.extend(f"  - {candidate}" for candidate in candidates)
-    raise SystemExit("\n".join(lines))
+    return resolve_executable(explicit, candidates, root=root, description="tsp_sa executable")
 
 
 def safe_name(text):
@@ -128,19 +127,14 @@ def expand_configs(configs):
     return expanded
 
 
-def extract_csv_rows(stdout):
-    rows = []
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            parsed = next(csv.reader([line]))
-        except csv.Error:
-            continue
-        if len(parsed) == len(BASE_FIELDS) and parsed[0] in ALGORITHMS:
-            rows.append(dict(zip(BASE_FIELDS, parsed)))
-    return rows
+def extract_csv_rows(stdout, family=None):
+    if family == "sa":
+        predicate = lambda algorithm: algorithm.startswith("sa")
+    elif family == "qlsa":
+        predicate = lambda algorithm: algorithm.startswith("qlsa")
+    else:
+        predicate = lambda algorithm: algorithm.startswith(("sa", "qlsa"))
+    return parse_program_rows(stdout, algorithm_predicate=predicate)
 
 
 def write_log(log_dir, label, command, completed):
@@ -236,10 +230,12 @@ def run_command(command, log_dir, config):
         print(f"!!! WARNING: fallback detected for {label}; see {log_path}", flush=True)
     if completed.returncode != 0:
         raise SystemExit(f"Command failed with exit code {completed.returncode}; see {log_path}")
-    rows = extract_csv_rows(completed.stdout)
-    if not rows:
-        raise SystemExit(f"No CSV rows found in command output; see {log_path}")
-    meta = metadata(config, fallback)
+    rows = extract_csv_rows(completed.stdout, config["family"])
+    try:
+        validate_command_output(rows, command, source=label)
+    except ExperimentCsvError as exc:
+        raise SystemExit(f"{exc}; see {log_path}") from exc
+    meta = metadata(config, False)
     for row in rows:
         row.update(meta)
     return rows
@@ -251,7 +247,7 @@ def write_rows(path, rows):
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
         writer.writeheader()
         for row in rows:
-            writer.writerow({field: row.get(field, "") for field in CSV_FIELDS})
+            writer.writerow(row_for_output(row, CSV_FIELDS))
 
 
 def main():
@@ -261,7 +257,7 @@ def main():
         args.seed = 201
 
     root = Path.cwd()
-    exe = find_executable(root)
+    exe = find_executable(root, args.executable)
     configs = load_configs(Path(args.config))
     if args.quick:
         configs = quick_configs(configs)
@@ -277,12 +273,13 @@ def main():
     for config in configs:
         input_path = input_dir / f"{config['instance']}.tsp"
         if not input_path.exists():
-            print(f"[warning] missing {input_path}; skipping {config.get('run_name', config['name'])}", flush=True)
-            continue
+            raise FileNotFoundError(f"missing requested instance: {input_path}")
         command = command_for(exe, input_path, config, args.repeat, args.seed)
         rows.extend(run_command(command, log_dir, config))
 
     output_path = Path(args.output)
+    if not rows:
+        raise ExperimentCsvError("no experiment rows were produced")
     write_rows(output_path, rows)
     print(f"Wrote targeted quality raw CSV: {output_path}", flush=True)
 

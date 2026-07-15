@@ -125,6 +125,42 @@ void assert_qlsa_equal(const tsp::QLSAResult& lhs, const tsp::QLSAResult& rhs) {
     assert(lhs.action_counts == rhs.action_counts);
 }
 
+void assert_island_semantics_equal(const tsp::IslandResult& lhs, const tsp::IslandResult& rhs) {
+    assert(lhs.best_tour == rhs.best_tour);
+    assert(lhs.best_length == rhs.best_length);
+    assert(lhs.final_length_of_best_island == rhs.final_length_of_best_island);
+    assert(lhs.island_count == rhs.island_count);
+    assert(lhs.base_seed == rhs.base_seed);
+    assert(lhs.topology == rhs.topology);
+    assert(lhs.iteration_budget_per_island == rhs.iteration_budget_per_island);
+    assert(lhs.total_iteration_budget == rhs.total_iteration_budget);
+    assert(lhs.total_iterations_completed == rhs.total_iterations_completed);
+    assert(lhs.total_accepted_moves == rhs.total_accepted_moves);
+    assert(lhs.total_improved_moves == rhs.total_improved_moves);
+    assert(lhs.migration_rounds == rhs.migration_rounds);
+    assert(lhs.migration_attempts == rhs.migration_attempts);
+    assert(lhs.migrations_adopted == rhs.migrations_adopted);
+    assert(lhs.deadline_reached == rhs.deadline_reached);
+    assert(lhs.iteration_budget_exhausted == rhs.iteration_budget_exhausted);
+    assert(lhs.islands.size() == rhs.islands.size());
+    for (size_t index = 0; index < lhs.islands.size(); ++index) {
+        const tsp::IslandChainResult& left = lhs.islands[index];
+        const tsp::IslandChainResult& right = rhs.islands[index];
+        assert(left.island_id == right.island_id);
+        assert(left.seed == right.seed);
+        assert(left.best_tour == right.best_tour);
+        assert(left.final_tour == right.final_tour);
+        assert(left.best_length == right.best_length);
+        assert(left.final_length == right.final_length);
+        assert(left.iterations_completed == right.iterations_completed);
+        assert(left.accepted_moves == right.accepted_moves);
+        assert(left.improved_moves == right.improved_moves);
+        assert(left.migration_attempts == right.migration_attempts);
+        assert(left.migrations_adopted == right.migrations_adopted);
+        assert(left.deadline_reached == right.deadline_reached);
+    }
+}
+
 void test_qlsa_chunk_equivalence(const tsp::DistanceMatrix& dm, const std::string& variant) {
     tsp::QLSAParams params;
     params.sa.iterations = 3073;
@@ -134,7 +170,7 @@ void test_qlsa_chunk_equivalence(const tsp::DistanceMatrix& dm, const std::strin
     params.sa.use_nearest_neighbor_init = false;
     params.variant = variant;
     params.epsilon = 0.17;
-    params.state_window = 7;
+    params.state_window = 3;
 
     const tsp::QLSAResult uninterrupted = tsp::run_qlsa_2opt(dm, params);
     tsp::QLSAState state = tsp::initialize_qlsa_state(dm, params);
@@ -145,6 +181,11 @@ void test_qlsa_chunk_equivalence(const tsp::DistanceMatrix& dm, const std::strin
         options.max_iterations = chunks[chunk_index++ % chunks.size()];
         const tsp::SearchChunkProgress progress = tsp::run_qlsa_chunk(dm, state, options);
         assert(progress.iterations_completed > 0);
+    }
+    if (variant == "current") {
+        assert(state.recent_deltas.size() == 3);
+        assert(state.recent_delta_head == 1);
+        assert(state.softmax_weights.size() == state.actions.size());
     }
     assert_qlsa_equal(uninterrupted, tsp::finalize_qlsa_state(dm, state));
 }
@@ -251,6 +292,17 @@ void test_island_topologies(const tsp::DistanceMatrix& dm) {
     assert_island_result_valid(dm, ring, params.island_count, params.sa_params.iterations);
     assert(ring.migration_rounds == 5);
     assert(ring.migration_attempts == ring.migration_rounds * params.island_count);
+
+    // The persistent OpenMP team must preserve fixed-work island results and
+    // migration ordering, independent of worker count or repeated execution.
+    tsp::IslandParams serial_params = params;
+    serial_params.threads = 1;
+    const tsp::IslandResult serial_ring =
+        tsp::run_openmp_islands(dm, serial_params, tsp::MigrationTopology::Ring);
+    assert_island_semantics_equal(serial_ring, ring);
+    const tsp::IslandResult ring_repeat =
+        tsp::run_openmp_islands(dm, params, tsp::MigrationTopology::Ring);
+    assert_island_semantics_equal(ring, ring_repeat);
 
     const tsp::IslandResult global =
         tsp::run_openmp_islands(dm, params, tsp::MigrationTopology::GlobalBest);

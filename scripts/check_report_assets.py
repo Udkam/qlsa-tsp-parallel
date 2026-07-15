@@ -8,6 +8,11 @@ import re
 import sys
 from pathlib import Path
 
+try:
+    from scripts.report_figure_manifest import validate_manifest
+except ModuleNotFoundError:  # Direct ``python scripts/...`` invocation.
+    from report_figure_manifest import validate_manifest  # type: ignore[no-redef]
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REPORT = ROOT / "docs" / "final" / "report.md"
@@ -117,6 +122,10 @@ def main() -> int:
         if fig_name not in text:
             print(f"[error] missing required figure reference: {fig_name}")
             failed = True
+
+    for error in validate_manifest():
+        print(f"[error] {error}")
+        failed = True
 
     if failed:
         return 1

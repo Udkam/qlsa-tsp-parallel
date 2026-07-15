@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -67,8 +68,16 @@ struct QLSAState {
     double temperature_decay = 1.0;
     std::vector<std::vector<double>> q_table;
     std::vector<int64_t> action_counts;
+    // Reused by softmax action selection. It is derived workspace rather than
+    // learning state, but belongs to the chain so parallel chains never share
+    // mutable scratch storage.
+    std::vector<double> softmax_weights;
     std::vector<int> recent_deltas;
     double recent_delta_sum = 0.0;
+    // Index of the oldest entry once recent_deltas reaches state_window. The
+    // vector is then a fixed-capacity circular window, avoiding an O(window)
+    // erase from the hot loop.
+    size_t recent_delta_head = 0;
     // For paper-sb + edge, stores the two incident best-tour cities for each
     // city index. It is allocated once per search state so diversity updates do
     // not allocate a hash table on every iteration.
@@ -82,6 +91,9 @@ struct QLSAState {
     bool initialized = false;
 };
 
+// Validates the parameter contract shared by CPU and accelerator backends.
+// Backend-specific limits are checked by the corresponding backend entrypoint.
+void validate_qlsa_params(const QLSAParams& params);
 [[nodiscard]] std::vector<QLSAAction> default_qlsa_actions();
 [[nodiscard]] int qlsa_state_from_average_delta(double average_delta, double delta_scale);
 [[nodiscard]] double qlsa_reward_from_delta(int delta, bool accepted);
@@ -99,8 +111,9 @@ void update_q_value(std::vector<std::vector<double>>& q_table,
                     double alpha,
                     double gamma);
 [[nodiscard]] int select_qlsa_action(const std::vector<double>& q_values,
-                                     const QLSAParams& params,
-                                     Rng& rng);
+                                      const QLSAParams& params,
+                                      Rng& rng,
+                                      std::vector<double>* softmax_weights = nullptr);
 
 [[nodiscard]] QLSAState initialize_qlsa_state(const DistanceMatrix& dm,
                                               const QLSAParams& params);

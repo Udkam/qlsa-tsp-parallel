@@ -26,6 +26,18 @@ add_executable(test_island test_island.cpp)
 target_link_libraries(test_island PRIVATE tsp_core)
 target_compile_definitions(test_island PRIVATE TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
+if(TARGET tsp_sa_mpi)
+    add_executable(test_mpi_parallel
+        test_mpi_parallel.cpp
+        ${CMAKE_SOURCE_DIR}/src/mpi_parallel.cpp
+    )
+    target_link_libraries(test_mpi_parallel PRIVATE tsp_core MPI::MPI_CXX)
+    target_compile_definitions(test_mpi_parallel PRIVATE
+        TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+        TSP_HAS_MPI=1
+    )
+endif()
+
 if(TSP_ENABLE_OPENMP AND OpenMP_CXX_FOUND)
     target_link_libraries(test_small_instance PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(test_parallel PRIVATE OpenMP::OpenMP_CXX)
@@ -45,6 +57,9 @@ set(TSP_TEST_TARGETS
     test_qlsa_paper_lite
     test_island
 )
+if(TARGET test_mpi_parallel)
+    list(APPEND TSP_TEST_TARGETS test_mpi_parallel)
+endif()
 
 # C/C++ assert must remain active in every test configuration. CMake's
 # optimized configurations define NDEBUG, so explicitly undefine it after
@@ -120,6 +135,25 @@ add_test(
             -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test_executable.cmake
 )
 
+if(TARGET test_mpi_parallel AND MPIEXEC_EXECUTABLE AND MPIEXEC_NUMPROC_FLAG)
+    set(TSP_MPI_TEST_PROCESSES 2)
+    if(MPIEXEC_MAX_NUMPROCS AND MPIEXEC_MAX_NUMPROCS LESS 2)
+        set(TSP_MPI_TEST_PROCESSES 1)
+    endif()
+    add_test(
+        NAME test_mpi_parallel
+        COMMAND ${MPIEXEC_EXECUTABLE}
+                ${MPIEXEC_NUMPROC_FLAG} ${TSP_MPI_TEST_PROCESSES}
+                ${MPIEXEC_PREFLAGS}
+                $<TARGET_FILE:test_mpi_parallel>
+                ${MPIEXEC_POSTFLAGS}
+    )
+    set_tests_properties(test_mpi_parallel PROPERTIES
+        PROCESSORS ${TSP_MPI_TEST_PROCESSES}
+        TIMEOUT 60
+    )
+endif()
+
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
     add_test(
@@ -131,8 +165,12 @@ if(Python3_Interpreter_FOUND)
                 tests.test_island_ablation_pipeline
                 tests.test_island_runner_hardening
                 tests.test_island_analyzer_hardening
+                tests.test_experiment_csv
+                tests.test_core_optimization_benchmark
+                tests.test_mpi_smoke_schema
                 tests.test_qlsa_variant_runner
                 tests.test_qlsa_variant_analysis
+                tests.test_report_figure_manifest
     )
     set_tests_properties(test_experiment_pipelines PROPERTIES
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}

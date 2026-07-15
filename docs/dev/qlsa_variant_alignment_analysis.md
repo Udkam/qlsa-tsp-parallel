@@ -2,9 +2,9 @@
 
 本实验比较 `current`、`paper` 与 `paper-sb` 三种 QLSA 入口。`current` 是已有工程化状态/动作版本，`paper` 使用 candidate-leader 来源选择，`paper-sb` 在 candidate-leader 上加入路径多样性状态。
 
-历史 raw CSV 没有 diversity metric 列时，`paper-sb` 行按当时实现明确标为 `hamming`；新的 `edge` 样本会作为独立条件汇总，不能与 Hamming 合并。
+历史 raw CSV 没有 diversity metric 列时，`paper-sb` 行按当时实现标为 `hamming`；`edge` 样本以独立条件汇总。
 
-实验目的不是替换已有 Step 5/6 结果，而是确认论文机制对齐变体已经进入同一 C++/OpenMP 实验流程，并观察其在代表实例上的质量和时间代价。
+三种变体使用统一的 C++/OpenMP 执行合同和共同种子，表中结果展示参数网格内达到的质量和时间代价。
 
 ## 各变体与度量条件的最佳配置
 

@@ -76,6 +76,42 @@ int main() {
     }
     assert(rejected_unsupported_variant);
 
+    tsp::ParallelParams oversized_state_window =
+        make_cuda_params(tsp::AlgorithmKind::QLSA, 23);
+    oversized_state_window.qlsa_params.state_window = tsp::kCudaMaxQlsaStateWindow + 1;
+    bool rejected_oversized_state_window = false;
+    try {
+        (void)tsp::run_parallel_chains(dm, oversized_state_window);
+    } catch (const std::invalid_argument& error) {
+        rejected_oversized_state_window =
+            std::string(error.what()).find("state_window must be <= 64") != std::string::npos;
+    }
+    assert(rejected_oversized_state_window);
+
+    tsp::ParallelParams oversized_block = make_cuda_params(tsp::AlgorithmKind::SA, 37);
+    oversized_block.cuda_block_size = 1025;
+    bool rejected_oversized_block = false;
+    try {
+        (void)tsp::run_parallel_chains(dm, oversized_block);
+    } catch (const std::invalid_argument& error) {
+        rejected_oversized_block =
+            std::string(error.what()).find("cuda_block_size must be in [1, 1024]") !=
+            std::string::npos;
+    }
+    assert(rejected_oversized_block);
+
+    tsp::ParallelParams too_many_actions = make_cuda_params(tsp::AlgorithmKind::QLSA, 41);
+    too_many_actions.qlsa_params.actions.assign(
+        9, tsp::QLSAAction{"cuda-overflow", 0.0, 1.0});
+    bool rejected_too_many_actions = false;
+    try {
+        (void)tsp::run_parallel_chains(dm, too_many_actions);
+    } catch (const std::invalid_argument& error) {
+        rejected_too_many_actions =
+            std::string(error.what()).find("supports 1..8 actions") != std::string::npos;
+    }
+    assert(rejected_too_many_actions);
+
     const tsp::ParallelParams sa_params = make_cuda_params(tsp::AlgorithmKind::SA, 7);
     const tsp::ParallelResult sa_result = tsp::run_parallel_chains(dm, sa_params);
     assert_valid(dm, sa_result);
@@ -97,6 +133,13 @@ int main() {
     const tsp::ParallelParams qlsa_params = make_cuda_params(tsp::AlgorithmKind::QLSA, 7);
     const tsp::ParallelResult qlsa_result = tsp::run_parallel_chains(dm, qlsa_params);
     assert_valid(dm, qlsa_result);
+
+    tsp::ParallelParams maximum_state_window =
+        make_cuda_params(tsp::AlgorithmKind::QLSA, 31);
+    maximum_state_window.qlsa_params.state_window = tsp::kCudaMaxQlsaStateWindow;
+    const tsp::ParallelResult maximum_state_window_result =
+        tsp::run_parallel_chains(dm, maximum_state_window);
+    assert_valid(dm, maximum_state_window_result);
 
     const tsp::ParallelResult repeat_result = tsp::run_parallel_chains(dm, sa_params);
     assert(repeat_result.best_length == sa_result.best_length);

@@ -18,7 +18,7 @@ namespace {
 constexpr uint64_t kSeedStride = 0x9E3779B97F4A7C15ULL;
 constexpr int kMaxActions = 8;
 constexpr int kStateCount = 5;
-constexpr int kMaxStateWindow = 64;
+constexpr int kMaxStateWindow = kCudaMaxQlsaStateWindow;
 constexpr int kCandidatePolicyBest = 0;
 constexpr int kCandidatePolicyRandom = 1;
 constexpr int kCandidatePolicyHybrid = 2;
@@ -692,7 +692,7 @@ __global__ void qlsa_kernel(const int* dm,
         int recent_count = 0;
         int recent_pos = 0;
         double recent_sum = 0.0;
-        const int window = max(1, min(state_window, kMaxStateWindow));
+        const int window = state_window;
         int state = state_from_average_delta(0.0, delta_scale);
 
         for (long long iter = 0; n >= 3 && iter < iterations; ++iter) {
@@ -835,7 +835,7 @@ __global__ void qlsa_candidate_kernel(const int* dm,
     int recent_count = 0;
     int recent_pos = 0;
     double recent_sum = 0.0;
-    const int window = max(1, min(state_window, kMaxStateWindow));
+    const int window = state_window;
     uint64_t action_rng = splitmix64_device(
         base_seed + kSeedStride * static_cast<uint64_t>(chain_id + 1) +
         0xD1B54A32D192ED03ULL);
@@ -996,33 +996,7 @@ std::vector<DeviceAction> make_device_actions(const QLSAParams& params) {
 }
 
 void validate_cuda_params(const DistanceMatrix& dm, const ParallelParams& params) {
-    if (dm.size() <= 0) {
-        throw std::invalid_argument("CUDA run requires a non-empty distance matrix");
-    }
-    if (params.chains < 1) {
-        throw std::invalid_argument("chains must be >= 1");
-    }
-    if (params.cuda_block_size < 1 || params.cuda_block_size > 1024) {
-        throw std::invalid_argument("cuda_block_size must be in [1, 1024]");
-    }
-    if (params.cuda_candidates_per_iter <= 0) {
-        throw std::invalid_argument("cuda_candidates_per_iter must be positive");
-    }
-    if (params.cuda_candidates_per_iter > params.cuda_block_size) {
-        throw std::invalid_argument("cuda_candidates_per_iter must be <= cuda_block_size");
-    }
-    if (params.algorithm == AlgorithmKind::QLSA && params.qlsa_params.variant != "current") {
-        throw std::invalid_argument("CUDA QLSA currently supports variant current only");
-    }
-    const long long iterations = (params.algorithm == AlgorithmKind::SA)
-                                     ? params.sa_params.iterations
-                                     : params.qlsa_params.sa.iterations;
-    if (iterations < 1) {
-        throw std::invalid_argument("iterations must be >= 1");
-    }
-    if (iterations > std::numeric_limits<int64_t>::max() / params.chains) {
-        throw std::overflow_error("iterations * chains overflows int64_t");
-    }
+    validate_cuda_request(dm, params);
 }
 
 ParallelResult build_parallel_result(const DistanceMatrix& dm,

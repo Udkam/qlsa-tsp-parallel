@@ -45,7 +45,7 @@
 | `results/summary/cuda_reversal_summary.csv` | CUDA candidate serial/parallel reversal 对比。 |
 | `results/summary/cuda_candidate_sweep_aggressive_summary.csv` | CUDA candidate aggressive 参数扫描。 |
 | `results/summary/large_cuda_formal_summary.csv` | 大实例 CUDA chain/candidate formal subset。 |
-| `results/logs/nsight/cuda_candidate_a280_hybrid_nsys_ascii.log` | a280 CUDA candidate-hybrid 的 Nsight Systems 文本摘要。 |
+| `results/final/cuda_candidate_a280_nsight_summary.md` | a280 CUDA candidate-hybrid 的脱敏 Nsight Systems API/传输统计摘要。 |
 | `figures/fig_course_06_cuda_boundary.png` | CUDA 多链模式与候选批量评价对比图。 |
 | `figures/fig_cuda_candidate_policy_formal.png` | CUDA SA 候选策略运行时间对比图。 |
 

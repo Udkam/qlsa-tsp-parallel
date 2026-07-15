@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "hash_algorithm": "sha256",
+  "figures": [
+    {
+      "figure": "figures/fig_course_01_openmp_speedup.png",
+      "figure_sha256": "58d7e67f31d8482747583e6504070bf3bd35baadbe7081c277c054d29d88049a",
+      "sources": [
+        {
+          "path": "results/summary/step5_multi_cpu_summary.csv",
+          "sha256": "d9daa127294f70dae6b3f09a6bbd1e5e10d79648702554b9241a79c181b8d91b"
+        }
+      ],
+      "command": "py scripts/make_course_report_figures.py"
+    },
+    {
+      "figure": "figures/fig_course_02_openmp_efficiency.png",
+      "figure_sha256": "7214b55379cd087f5d4a582f4ebbc0dbf1cbc1becdb45fa90bb81be021c7d872",
+      "sources": [
+        {
+          "path": "results/summary/step5_multi_cpu_summary.csv",
+          "sha256": "d9daa127294f70dae6b3f09a6bbd1e5e10d79648702554b9241a79c181b8d91b"
+        }
+      ],
+      "command": "py scripts/make_course_report_figures.py"
+    },
+    {
+      "figure": "figures/fig_course_03_default_gap.png",
+      "figure_sha256": "63136cd0eaf3d148fd5b274a99ebe2af70aeec96e660e8afee390abc02c4fcde",
+      "sources": [
+        {
+          "path": "results/summary/step5_multi_cpu_summary.csv",
+          "sha256": "d9daa127294f70dae6b3f09a6bbd1e5e10d79648702554b9241a79c181b8d91b"
+        }
+      ],
+      "command": "py scripts/make_course_report_figures.py"
+    },
+    {
+      "figure": "figures/fig_course_04_targeted_quality.png",
+      "figure_sha256": "9fdb164ba85bc0774b7e5bdeef2a933c17ba1072443cb47c13e80115471cc04d",
+      "sources": [
+        {
+          "path": "results/summary/targeted_quality_summary.csv",
+          "sha256": "bb4c0915055175f8f9d08b184e5af7fcd4119516b5ed244bd00072be83080599"
+        }
+      ],
+      "command": "py scripts/make_course_report_figures.py"
+    },
+    {
+      "figure": "figures/fig_course_05_policy_comparison.png",
+      "figure_sha256": "8dd87c72a2aa286c5e230b3f5e32b77eeeb957aa12a522a39e5b5302b4ab6b08",
+      "sources": [
+        {
+          "path": "results/summary/policy_comparison_summary.csv",
+          "sha256": "e58174059f684c50c2a881d4b36476856f1ee47d1f1e9616b399cd02dfdf4566"
+        }
+      ],
+      "command": "py scripts/make_course_report_figures.py"
+    },
+    {
+      "figure": "figures/fig_course_06_cuda_boundary.png",
+      "figure_sha256": "d8f435fb9c0e751a58bb17f6f03cef7d5dbb3073cfa978b8d4c4905c72765602",
+      "sources": [
+        {
+          "path": "results/summary/large_cuda_formal_summary.csv",
+          "sha256": "20a73cf1999a1b38686d142b57a2b15f77f528eef9319a72b8c22928089f732b"
+        }
+      ],
+      "command": "py scripts/make_course_report_figures.py"
+    },
+    {
+      "figure": "figures/fig_course_07_mpi_scaling.png",
+      "figure_sha256": "8063995985863ad1004d57c8b7eddaa3ae67d54519b1121347ec2305e6272146",
+      "sources": [
+        {
+          "path": "results/summary/mpi_vm_scaling_formal_summary.csv",
+          "sha256": "539831560c1cb6dcb3ac29b38955e898417f554ed30c090d6304ac8e3ea358c7"
+        }
+      ],
+      "command": "py scripts/make_course_report_figures.py"
+    },
+    {
+      "figure": "figures/fig_course_09_paper_quality.png",
+      "figure_sha256": "a4d3fb443b249c00502bf94ed35680eca4b7232b7a7f7445c3624365c77f3bfd",
+      "sources": [
+        {
+          "path": "results/reference/paper_hard_instance_quality.csv",
+          "sha256": "ef6b7481ba892d18391ca12eab93b6a8402e090f602d4d151e3a780137d65017"
+        },
+        {
+          "path": "results/summary/targeted_quality_summary.csv",
+          "sha256": "bb4c0915055175f8f9d08b184e5af7fcd4119516b5ed244bd00072be83080599"
+        }
+      ],
+      "command": "py scripts/make_course_report_figures.py"
+    },
+    {
+      "figure": "figures/fig_course_10_openmp_thread_scaling.png",
+      "figure_sha256": "c3dac666c650d60e47a012c608223f0ff7a51e3a69a7c15f4a426bb6074da483",
+      "sources": [
+        {
+          "path": "results/summary/openmp_scaling_final_summary.csv",
+          "sha256": "70d006c5f0f6c009a4be4c292b1aaf77377de4b1795d6cadc66638e75dc2e698"
+        }
+      ],
+      "command": "py scripts/make_course_report_figures.py"
+    },
+    {
+      "figure": "figures/fig_course_11_representative_openmp.png",
+      "figure_sha256": "39c312ca60fabf0c1cdd4f57582d0f3957783c3b637889ceaba7ed4c1ab60a72",
+      "sources": [
+        {
+          "path": "results/raw/final_all_data_openmp_raw.csv",
+          "sha256": "6eb94521678a3c32977a0fca890322188b2214bdfb1461c92575561d9bffae88"
+        },
+        {
+          "path": "results/summary/final_representative_openmp_summary.csv",
+          "sha256": "b12593e53842bb5eeb06a3675ee2ed32fce5744da0a3163152d35970c55306de"
+        }
+      ],
+      "command": "py scripts/analyze_all_data_openmp.py --input results/raw/final_all_data_openmp_raw.csv --output results/summary/final_representative_openmp_summary.csv --figure figures/fig_course_11_representative_openmp.png"
+    },
+    {
+      "figure": "figures/fig_cuda_candidate_policy_formal.png",
+      "figure_sha256": "1fb6a0583e0495c3dcc5369dd667d24401ec18bdf83670cb7036a6cd6e88f778",
+      "sources": [
+        {
+          "path": "results/raw/cuda_candidate_policy_formal_raw.csv",
+          "sha256": "ffcb7dbd4a2858edf8cc6b32a9ca5ba21f77d0b15f3d6be248b3c06aaeff9583"
+        },
+        {
+          "path": "results/summary/cuda_candidate_policy_formal_summary.csv",
+          "sha256": "1a6df3e0763d1c4550a48efe4dbe0582e9dec8c31794d10524d8bf3558087224"
+        }
+      ],
+      "command": "py scripts/analyze_cuda_candidate.py --input results/raw/cuda_candidate_policy_formal_raw.csv --output results/summary/cuda_candidate_policy_formal_summary.csv --figure figures/fig_cuda_candidate_policy_formal.png"
+    },
+    {
+      "figure": "figures/fig_qlsa_variant_alignment.png",
+      "figure_sha256": "8e172f4ab7348c73c38f4ff61cc8c94a1341672bfa4ac1ea639a21805ce159e0",
+      "sources": [
+        {
+          "path": "results/raw/qlsa_variant_alignment_raw.csv",
+          "sha256": "228fc1b9abeee1bc0a257e3c64c564e60a5e70572dd2d931713e2ce3fdfe8fbf"
+        },
+        {
+          "path": "results/summary/qlsa_variant_alignment_summary.csv",
+          "sha256": "01920df149f3315813290e1d13b78685df9bc8e93b307f842ed98a7f7ae66aaf"
+        }
+      ],
+      "command": "py scripts/analyze_qlsa_variant_experiments.py --input results/raw/qlsa_variant_alignment_raw.csv --output results/summary/qlsa_variant_alignment_summary.csv --figure figures/fig_qlsa_variant_alignment.png"
+    }
+  ]
+}

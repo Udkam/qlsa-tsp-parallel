@@ -194,7 +194,10 @@ void print_csv_row(const tsp::Instance& instance,
               << result.global.total_accepted_moves << ','
               << result.global.total_improved_moves << ','
               << result.world_size << ','
-              << std::fixed << std::setprecision(3) << result.communication_ms << '\n';
+              << std::fixed << std::setprecision(3) << result.communication_ms << ','
+              << result.global.actual_threads << ','
+              << result.global.total_iterations_completed << ','
+              << (result.global.deadline_reached ? "true" : "false") << '\n';
 }
 
 void print_human_run(int run_index,
@@ -242,7 +245,7 @@ int main(int argc, char** argv) {
                           << " epsilon=" << options.qlsa_epsilon
                           << " policy=" << options.qlsa_policy << '\n';
             }
-            std::cout << "CSV: algorithm,instance,dimension,iterations,seed,init,chains,threads,parallel,best_length,final_length,elapsed_ms,accepted_moves,improved_moves,mpi_ranks,communication_ms\n";
+            std::cout << "CSV: algorithm,instance,dimension,iterations,seed,init,chains,threads,parallel,best_length,final_length,elapsed_ms,accepted_moves,improved_moves,mpi_ranks,communication_ms,actual_threads,iterations_completed,deadline_reached\n";
         }
 
         std::vector<double> elapsed_values;

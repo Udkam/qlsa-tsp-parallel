@@ -18,7 +18,7 @@ struct Move {
     int k = 1;
 };
 
-void validate_params(const QLSAParams& params) {
+void validate_params_impl(const QLSAParams& params) {
     if (params.alpha < 0.0 || params.alpha > 1.0) {
         throw std::invalid_argument("QLSA alpha must be in [0, 1]");
     }
@@ -288,6 +288,13 @@ void verify_qlsa_state(const DistanceMatrix& dm, const QLSAState& state) {
 
 }  // namespace
 
+void validate_qlsa_params(const QLSAParams& params) {
+    validate_params_impl(params);
+    if (params.variant == "current") {
+        (void)normalized_actions(params);
+    }
+}
+
 std::vector<QLSAAction> default_qlsa_actions() {
     return {
         {"short-2opt", 0.0, 0.25},
@@ -364,7 +371,10 @@ void update_q_value(std::vector<std::vector<double>>& q_table,
         old_value + alpha * (target - old_value);
 }
 
-int select_qlsa_action(const std::vector<double>& q_values, const QLSAParams& params, Rng& rng) {
+int select_qlsa_action(const std::vector<double>& q_values,
+                       const QLSAParams& params,
+                       Rng& rng,
+                       std::vector<double>* softmax_weights) {
     if (q_values.empty()) {
         throw std::invalid_argument("empty Q row");
     }
@@ -376,7 +386,11 @@ int select_qlsa_action(const std::vector<double>& q_values, const QLSAParams& pa
     }
     if (params.policy == "softmax") {
         const double max_q = max_q_value(q_values);
-        std::vector<double> weights(q_values.size(), 0.0);
+        std::vector<double> local_weights;
+        std::vector<double>& weights = softmax_weights != nullptr ? *softmax_weights : local_weights;
+        if (weights.size() != q_values.size()) {
+            weights.resize(q_values.size());
+        }
         double total = 0.0;
         for (size_t i = 0; i < q_values.size(); ++i) {
             weights[i] = std::exp((q_values[i] - max_q) / params.softmax_temperature);
@@ -401,7 +415,7 @@ int select_qlsa_action(const std::vector<double>& q_values, const QLSAParams& pa
 }
 
 QLSAState initialize_qlsa_state(const DistanceMatrix& dm, const QLSAParams& params) {
-    validate_params(params);
+    validate_qlsa_params(params);
     if (dm.size() <= 0) {
         throw std::invalid_argument("run_qlsa_2opt requires a non-empty distance matrix");
     }
@@ -428,6 +442,7 @@ QLSAState initialize_qlsa_state(const DistanceMatrix& dm, const QLSAParams& para
         state.q_table.assign(static_cast<size_t>(kQLSAStateCount),
                              std::vector<double>(state.actions.size(), 0.0));
         state.action_counts.assign(state.actions.size(), 0);
+        state.softmax_weights.resize(state.actions.size());
         state.recent_deltas.reserve(static_cast<size_t>(params.state_window));
         state.learning_state = qlsa_state_from_average_delta(0.0, params.delta_scale);
     } else {
@@ -436,6 +451,7 @@ QLSAState initialize_qlsa_state(const DistanceMatrix& dm, const QLSAParams& para
                              std::vector<double>(static_cast<size_t>(kCandidateLeaderActionCount),
                                                  0.0));
         state.action_counts.assign(static_cast<size_t>(kCandidateLeaderActionCount), 0);
+        state.softmax_weights.resize(static_cast<size_t>(kCandidateLeaderActionCount));
         if (params.variant == "paper-sb" && params.diversity_metric == "edge") {
             refresh_edge_diversity_cache(state);
         }
@@ -482,7 +498,8 @@ SearchChunkProgress run_qlsa_chunk(const DistanceMatrix& dm,
             const int action_index =
                 select_qlsa_action(state.q_table[static_cast<size_t>(state.learning_state)],
                                    state.params,
-                                   state.rng);
+                                   state.rng,
+                                   &state.softmax_weights);
             ++state.action_counts[static_cast<size_t>(action_index)];
             const Move move = sample_move_for_action(
                 n, state.actions[static_cast<size_t>(action_index)], state.rng);
@@ -507,11 +524,20 @@ SearchChunkProgress run_qlsa_chunk(const DistanceMatrix& dm,
                 }
             }
 
-            state.recent_deltas.push_back(delta);
-            state.recent_delta_sum += static_cast<double>(delta);
-            if (static_cast<int>(state.recent_deltas.size()) > state.params.state_window) {
-                state.recent_delta_sum -= static_cast<double>(state.recent_deltas.front());
-                state.recent_deltas.erase(state.recent_deltas.begin());
+            const size_t state_window = static_cast<size_t>(state.params.state_window);
+            if (state.recent_deltas.size() < state_window) {
+                state.recent_deltas.push_back(delta);
+                state.recent_delta_sum += static_cast<double>(delta);
+                if (state.recent_deltas.size() == state_window) {
+                    state.recent_delta_head = 0;
+                }
+            } else {
+                const size_t overwritten = state.recent_delta_head;
+                state.recent_delta_sum -=
+                    static_cast<double>(state.recent_deltas[overwritten]);
+                state.recent_deltas[overwritten] = delta;
+                state.recent_delta_sum += static_cast<double>(delta);
+                state.recent_delta_head = (overwritten + 1U) % state_window;
             }
             const double average_delta =
                 state.recent_delta_sum / static_cast<double>(state.recent_deltas.size());
@@ -529,7 +555,8 @@ SearchChunkProgress run_qlsa_chunk(const DistanceMatrix& dm,
             const int action_index =
                 select_qlsa_action(state.q_table[static_cast<size_t>(state.learning_state)],
                                    state.params,
-                                   state.rng);
+                                   state.rng,
+                                   &state.softmax_weights);
             ++state.action_counts[static_cast<size_t>(action_index)];
 
             Tour leader;
@@ -645,6 +672,7 @@ bool migrate_qlsa_tour(const DistanceMatrix& dm, QLSAState& state, const Tour& m
     if (state.params.variant == "current") {
         state.recent_deltas.clear();
         state.recent_delta_sum = 0.0;
+        state.recent_delta_head = 0;
         state.learning_state = qlsa_state_from_average_delta(0.0, state.params.delta_scale);
     } else if (state.params.variant == "paper-sb") {
         state.learning_state = diversity_state(state);

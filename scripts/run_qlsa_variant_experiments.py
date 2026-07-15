@@ -11,55 +11,31 @@ import subprocess
 import sys
 from pathlib import Path
 
+try:
+    from scripts.experiment_csv import (
+        CURRENT_HEADER,
+        ExperimentCsvError,
+        parse_program_rows,
+        resolve_executable,
+        row_for_output,
+        validate_command_output,
+    )
+except ModuleNotFoundError:  # Direct ``python scripts/...`` invocation.
+    from experiment_csv import (  # type: ignore[no-redef]
+        CURRENT_HEADER,
+        ExperimentCsvError,
+        parse_program_rows,
+        resolve_executable,
+        row_for_output,
+        validate_command_output,
+    )
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
-PROGRAM_HEADER = [
-    "algorithm",
-    "instance",
-    "dimension",
-    "iterations",
-    "seed",
-    "init",
-    "chains",
-    "threads",
-    "parallel",
-    "best_length",
-    "final_length",
-    "elapsed_ms",
-    "accepted_moves",
-    "improved_moves",
-]
-
-# The CLI has kept this 14-column prefix stable while extending its accounting
-# and migration fields.  This runner persists only the comparison prefix, but
-# must accept every supported CLI schema so current builds do not silently
-# produce an empty experiment CSV.
-PROGRAM_EXTENDED_HEADER = PROGRAM_HEADER + [
-    "total_elapsed_ms",
-    "cuda_kernel_elapsed_ms",
-    "requested_backend",
-    "actual_backend",
-    "backend_fallback",
-    "backend_fallback_reason",
-    "iterations_completed",
-    "deadline_reached",
-]
-
-PROGRAM_MIGRATION_HEADER = PROGRAM_EXTENDED_HEADER + [
-    "migration_topology",
-    "migration_interval",
-    "migration_rounds",
-    "migration_attempts",
-    "migrations_adopted",
-]
-
-PROGRAM_HEADERS_BY_WIDTH = {
-    len(PROGRAM_HEADER): PROGRAM_HEADER,
-    len(PROGRAM_EXTENDED_HEADER): PROGRAM_EXTENDED_HEADER,
-    len(PROGRAM_MIGRATION_HEADER): PROGRAM_MIGRATION_HEADER,
-    len(PROGRAM_MIGRATION_HEADER) + 1: PROGRAM_MIGRATION_HEADER + ["actual_threads"],
-}
+PROGRAM_HEADER = CURRENT_HEADER
+DEFAULT_OUTPUT = ROOT / "results" / "raw" / "qlsa_variant_alignment_raw.csv"
+QUICK_OUTPUT = ROOT / "results" / "raw" / "qlsa_variant_alignment_quick_raw.csv"
 
 EXTRA_HEADER = [
     "qlsa_variant",
@@ -88,12 +64,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--threads", type=int, default=8)
     parser.add_argument("--seed", type=int, default=401)
     parser.add_argument("--input-dir", default=str(ROOT / "data"))
-    parser.add_argument("--output", default=str(ROOT / "results" / "raw" / "qlsa_variant_alignment_raw.csv"))
+    parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
+    parser.add_argument("--executable", type=Path, help="Explicit tsp_sa executable path.")
     parser.add_argument("--quick", action="store_true")
     return parser.parse_args()
 
 
-def find_executable() -> Path:
+def find_executable(explicit: Path | None = None) -> Path:
     candidates = [
         ROOT / "build" / "ninja-cuda-release" / "tsp_sa.exe",
         ROOT / "build" / "ninja-cuda-release" / "tsp_sa",
@@ -106,28 +83,23 @@ def find_executable() -> Path:
         ROOT / "build" / "Release" / "tsp_sa.exe",
         ROOT / "build" / "tsp_sa",
     ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    raise FileNotFoundError(
-        "Could not find tsp_sa executable; build the project first "
-        "(for example: cmake --preset ninja-cuda-release)"
+    return resolve_executable(
+        explicit,
+        candidates,
+        root=ROOT,
+        description="tsp_sa executable (build the project first, for example: cmake --preset ninja-cuda-release)",
     )
 
 
 def rows_from_stdout(stdout: str) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line or line.startswith("CSV:"):
-            continue
-        try:
-            parts = next(csv.reader([line]))
-        except csv.Error:
-            continue
-        if parts[0].startswith("qlsa") and len(parts) in PROGRAM_HEADERS_BY_WIDTH:
-            rows.append(dict(zip(PROGRAM_HEADER, parts[: len(PROGRAM_HEADER)])))
-    return rows
+    return parse_program_rows(stdout, algorithm_predicate=lambda algorithm: algorithm.startswith("qlsa"))
+
+
+def output_path_for_args(args: argparse.Namespace) -> Path:
+    output = Path(args.output)
+    if args.quick and output == DEFAULT_OUTPUT:
+        return QUICK_OUTPUT
+    return output if output.is_absolute() else ROOT / output
 
 
 def run_one(
@@ -204,6 +176,10 @@ def run_one(
         print(completed.stderr, file=sys.stderr)
         raise RuntimeError(f"command failed with exit code {completed.returncode}; see {log_file}")
     rows = rows_from_stdout(completed.stdout)
+    try:
+        validate_command_output(rows, command, source=f"{input_path.name} {variant} {policy}")
+    except ExperimentCsvError as exc:
+        raise ExperimentCsvError(f"{exc}; see {log_file}") from exc
     for row in rows:
         row["qlsa_variant"] = variant
         row["policy"] = policy
@@ -225,13 +201,11 @@ def main() -> int:
         args.chains = 16
         args.threads = 8
 
-    exe = find_executable()
+    exe = find_executable(args.executable)
     input_dir = Path(args.input_dir)
     if not input_dir.is_absolute():
         input_dir = ROOT / input_dir
-    output = Path(args.output)
-    if not output.is_absolute():
-        output = ROOT / output
+    output = output_path_for_args(args)
     output.parent.mkdir(parents=True, exist_ok=True)
     log_dir = ROOT / "results" / "logs" / "qlsa_variant_alignment"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -240,8 +214,7 @@ def main() -> int:
     for instance in args.instances:
         input_path = input_dir / f"{instance}.tsp"
         if not input_path.exists():
-            print(f"[warning] missing instance, skipped: {input_path}")
-            continue
+            raise FileNotFoundError(f"missing requested instance: {input_path}")
         for variant in args.variants:
             thresholds: list[float | None] = [None]
             if variant == "paper-sb":
@@ -250,10 +223,12 @@ def main() -> int:
                 for threshold in thresholds:
                     all_rows.extend(run_one(exe, input_path, variant, policy, threshold, args, log_dir))
 
+    if not all_rows:
+        raise ExperimentCsvError("no experiment rows were produced")
     with output.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=PROGRAM_HEADER + EXTRA_HEADER)
         writer.writeheader()
-        writer.writerows(all_rows)
+        writer.writerows(row_for_output(row, PROGRAM_HEADER + EXTRA_HEADER) for row in all_rows)
     print(f"[ok] wrote {len(all_rows)} rows to {output.relative_to(ROOT)}")
     return 0
 

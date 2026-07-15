@@ -45,20 +45,49 @@ std::pair<std::string, std::string> parse_header_line(const std::string& line) {
     return {uppercase(trim(key)), trim(value)};
 }
 
-void assign_coord(Instance& instance, int id, double x, double y) {
+void assign_coord(Instance& instance,
+                  std::vector<bool>& coordinate_ids_seen,
+                  int id,
+                  double x,
+                  double y) {
     if (id <= 0) {
         throw std::runtime_error("NODE_COORD_SECTION uses non-positive node id");
     }
-    if (instance.dimension > 0) {
-        if (instance.coords.empty()) {
-            instance.coords.assign(static_cast<size_t>(instance.dimension), Coord{});
+    if (instance.dimension <= 0) {
+        throw std::runtime_error("NODE_COORD_SECTION requires DIMENSION before the section");
+    }
+    if (id > instance.dimension) {
+        throw std::runtime_error("NODE_COORD_SECTION node id exceeds DIMENSION");
+    }
+    if (instance.coords.empty()) {
+        instance.coords.assign(static_cast<size_t>(instance.dimension), Coord{});
+    }
+    if (coordinate_ids_seen.empty()) {
+        coordinate_ids_seen.assign(static_cast<size_t>(instance.dimension), false);
+    }
+
+    const size_t index = static_cast<size_t>(id - 1);
+    if (coordinate_ids_seen[index]) {
+        throw std::runtime_error("NODE_COORD_SECTION contains duplicate node id " +
+                                 std::to_string(id));
+    }
+    coordinate_ids_seen[index] = true;
+    instance.coords[index] = Coord{x, y};
+}
+
+void validate_coordinate_ids(const Instance& instance,
+                             const std::vector<bool>& coordinate_ids_seen,
+                             bool saw_node_coord_section) {
+    if (!saw_node_coord_section) {
+        return;
+    }
+    for (int id = 1; id <= instance.dimension; ++id) {
+        const size_t index = static_cast<size_t>(id - 1);
+        if (index >= coordinate_ids_seen.size() || !coordinate_ids_seen[index]) {
+            throw std::runtime_error(
+                "NODE_COORD_SECTION is missing node id " + std::to_string(id) +
+                "; expected each id from 1 through DIMENSION exactly once");
         }
-        if (id > instance.dimension) {
-            throw std::runtime_error("NODE_COORD_SECTION node id exceeds DIMENSION");
-        }
-        instance.coords[static_cast<size_t>(id - 1)] = Coord{x, y};
-    } else {
-        instance.coords.push_back(Coord{x, y});
     }
 }
 
@@ -130,6 +159,8 @@ Instance load_tsplib(const std::string& path) {
 
     Instance instance;
     Section section = Section::Header;
+    bool saw_node_coord_section = false;
+    std::vector<bool> coordinate_ids_seen;
     std::string line;
 
     while (std::getline(input, line)) {
@@ -144,6 +175,14 @@ Instance load_tsplib(const std::string& path) {
         }
 
         if (upper_line == "NODE_COORD_SECTION") {
+            if (instance.dimension <= 0) {
+                throw std::runtime_error(
+                    "NODE_COORD_SECTION requires a positive DIMENSION before the section");
+            }
+            if (!saw_node_coord_section) {
+                coordinate_ids_seen.assign(static_cast<size_t>(instance.dimension), false);
+                saw_node_coord_section = true;
+            }
             section = Section::NodeCoord;
             continue;
         }
@@ -184,7 +223,7 @@ Instance load_tsplib(const std::string& path) {
             if (!(iss >> id >> x >> y)) {
                 throw std::runtime_error("invalid NODE_COORD_SECTION line: " + line);
             }
-            assign_coord(instance, id, x, y);
+            assign_coord(instance, coordinate_ids_seen, id, x, y);
             continue;
         }
 
@@ -201,6 +240,7 @@ Instance load_tsplib(const std::string& path) {
     }
 
     validate_basic_fields(instance);
+    validate_coordinate_ids(instance, coordinate_ids_seen, saw_node_coord_section);
     reject_unsupported_problem_type(instance);
     reject_asymmetric_explicit_full_matrix(instance);
     if (instance.name.empty()) {
